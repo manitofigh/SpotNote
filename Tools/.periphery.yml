@@ -1,0 +1,10 @@
+# Periphery configuration -- whole-program dead-code analysis.
+# Invoked from repo root by scripts/periphery.sh.
+# Periphery auto-discovers Package.swift and builds every SPM target.
+retain_public: false
+retain_objc_accessible: true
+retain_unused_protocol_func_params: false
+retain_assign_only_properties: true
+disable_redundant_public_analysis: false
+strict: true
+format: xcode

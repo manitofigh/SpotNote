@@ -1,0 +1,149 @@
+name: SpotNote
+options:
+  bundleIdPrefix: com.spotnote
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: false
+  createIntermediateGroups: true
+  defaultConfig: Debug
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: -Onone
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: -O
+      SWIFT_TREAT_WARNINGS_AS_ERRORS: "YES"
+
+configs:
+  Debug: debug
+  Release: release
+
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.0
+
+targets:
+  SpotNote:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/SpotNoteApp
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - target: Core
+        embed: true
+      - target: Spotlight
+        embed: true
+      - package: Sparkle
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: en
+        CFBundleDisplayName: SpotNote
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSUIElement: true
+        NSHighResolutionCapable: true
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+        SUFeedURL: https://updates.spotnote.org/appcast.xml
+        SUPublicEDKey: VD6yAH9vRkg9D6v2NGxV5hVHAWil4gqGbBFhAjPe7Kw=
+        SUEnableInstallerLauncherService: true
+    entitlements:
+      path: App/SpotNote.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.network.client: true
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - $(TeamIdentifierPrefix)$(CFBundleIdentifier)-spks
+          - $(TeamIdentifierPrefix)$(CFBundleIdentifier)-spki
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spotnote.SpotNote
+        ENABLE_HARDENED_RUNTIME: "YES"
+        COMBINE_HIDPI_IMAGES: "YES"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LD_RUNPATH_SEARCH_PATHS:
+          - "@executable_path/../Frameworks"
+    scheme:
+      testTargets:
+        - CoreTests
+        - SpotlightTests
+
+  Core:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Core
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spotnote.Core
+        PRODUCT_MODULE_NAME: Core
+        DEFINES_MODULE: "YES"
+        GENERATE_INFOPLIST_FILE: "YES"
+
+  Spotlight:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Spotlight
+        excludes:
+          - "**/.DS_Store"
+          - Resources
+      - path: Sources/Spotlight/Resources
+        buildPhase: resources
+        excludes:
+          - "**/.DS_Store"
+          - README.md
+    dependencies:
+      - target: Core
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spotnote.Spotlight
+        PRODUCT_MODULE_NAME: Spotlight
+        DEFINES_MODULE: "YES"
+        GENERATE_INFOPLIST_FILE: "YES"
+
+  CoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/CoreTests
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - target: Core
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spotnote.CoreTests
+        GENERATE_INFOPLIST_FILE: "YES"
+
+  SpotlightTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/SpotlightTests
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - target: Spotlight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spotnote.SpotlightTests
+        GENERATE_INFOPLIST_FILE: "YES"
