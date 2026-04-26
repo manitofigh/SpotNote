@@ -205,8 +205,3 @@ All tools are vendored via SPM plugins or Homebrew and invoked from `make` targe
 - Subject line <= 72 chars. No trailing period. Imperative mood.
 - Body is optional; when present, separate from subject with a blank line and wrap at ~100 chars.
 - One logical change per commit.
-
-### 7.2 Commit Cadence
-- After finishing a round of changes, commit and push to `origin` before considering the task complete.
-- Never use destructive git commands (`push --force`, `reset --hard`, `branch -D`, history rewrites on `main`) without explicit user instruction.
-- Never bypass hooks (`--no-verify`) or signing without explicit user instruction.
