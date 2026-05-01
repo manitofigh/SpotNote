@@ -183,7 +183,7 @@ spctl -a -vvv -t execute "$APP_PATH"
 echo "[6/6] Packaging final distribution archive..."
 FINAL_ZIP="$ROOT_DIR/dist/$APP_NAME-$SHORT_VERSION.zip"
 rm -f "$FINAL_ZIP"
-ditto -c -k --keepParent "$APP_PATH" "$FINAL_ZIP"
+ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$FINAL_ZIP"
 
 DMG_PATH="$ROOT_DIR/dist/$APP_NAME.dmg"
 echo "[7/9] Building dmg at $DMG_PATH using create-dmg (plain default)..."
@@ -223,7 +223,7 @@ ENCLOSURE_PATH="$UPDATES_DIR/$ENCLOSURE_BASENAME"
 RELEASE_NOTES_BASENAME="release-notes-$SHORT_VERSION.html"
 RELEASE_NOTES_PATH="$UPDATES_DIR/$RELEASE_NOTES_BASENAME"
 rm -f "$ENCLOSURE_PATH"
-ditto -c -k --keepParent "$APP_PATH" "$ENCLOSURE_PATH"
+ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ENCLOSURE_PATH"
 
 UPDATES_BASE_URL="${SPOTNOTE_UPDATES_BASE_URL:-https://updates.spotnote.org}"
 ENCODED_NAME="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$ENCLOSURE_BASENAME")"
@@ -279,6 +279,18 @@ XML
 
 echo "[9/9] Signing appcast enclosure..."
 "$ROOT_DIR/scripts/sign_update.sh" "$ENCLOSURE_PATH" "$APPCAST_PATH"
+
+if grep -q 'INSERT_SPARKLE_EDDSA_SIGNATURE' "$APPCAST_PATH"; then
+  echo "ERROR: appcast still contains placeholder Sparkle signature."
+  exit 1
+fi
+
+echo "[postflight] Verifying Sparkle archive extraction..."
+VERIFY_DIR="$(mktemp -d)"
+trap 'rm -f "$EXPORT_PLIST_TMP"; rm -rf "$VERIFY_DIR"' EXIT
+ditto -x -k "$ENCLOSURE_PATH" "$VERIFY_DIR"
+codesign --verify --deep --strict --verbose=2 "$VERIFY_DIR/$APP_NAME.app"
+spctl -a -vvv -t execute "$VERIFY_DIR/$APP_NAME.app"
 
 echo ""
 echo "Done! Release $SHORT_VERSION (build $BUILD_VERSION)"
