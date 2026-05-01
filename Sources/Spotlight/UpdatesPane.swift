@@ -22,7 +22,7 @@ struct UpdatesPane: View {
       Toggle(isOn: $autoCheck) {
         VStack(alignment: .leading, spacing: 2) {
           Text("Automatically check for updates")
-          Text("SpotNote will check periodically and notify you when a new version is available.")
+          Text("SpotNote will check for updates periodically and notify you when a new version is ready.")
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
         }
