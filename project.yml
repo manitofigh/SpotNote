@@ -13,8 +13,8 @@ settings:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    MARKETING_VERSION: "0.3.1"
-    CURRENT_PROJECT_VERSION: "4"
+    MARKETING_VERSION: "0.3.2"
+    CURRENT_PROJECT_VERSION: "5"
   configs:
     Debug:
       SWIFT_OPTIMIZATION_LEVEL: -Onone
@@ -69,8 +69,8 @@ targets:
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.network.client: true
         com.apple.security.temporary-exception.mach-lookup.global-name:
-          - $(TeamIdentifierPrefix)$(CFBundleIdentifier)-spks
-          - $(TeamIdentifierPrefix)$(CFBundleIdentifier)-spki
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spks
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spki
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.spotnote.SpotNote
