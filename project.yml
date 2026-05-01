@@ -13,8 +13,8 @@ settings:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
   configs:
     Debug:
       SWIFT_OPTIMIZATION_LEVEL: -Onone
@@ -79,6 +79,24 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS:
           - "@executable_path/../Frameworks"
+    postBuildScripts:
+      - name: Embed Sparkle InstallerLauncher in LoginItems
+        # Sparkle's sandboxed update path requires Installer.xpc to be discoverable via
+        # SMAppService.loginItem. That API only finds bundles at Contents/Library/LoginItems.
+        # Without this copy, Sparkle tries to write the bundle into ~/Library/Caches which
+        # the sandbox blocks, leaving the Launcher/ directory empty and the update failing.
+        script: |
+          INSTALLER="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/Sparkle.framework/XPCServices/Installer.xpc"
+          LOGINITEMS="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Contents/Library/LoginItems"
+          if [ ! -d "$INSTALLER" ]; then
+            echo "warning: Sparkle Installer.xpc not found at $INSTALLER — skipping LoginItems embed"
+            exit 0
+          fi
+          mkdir -p "$LOGINITEMS"
+          rm -rf "$LOGINITEMS/Installer.xpc"
+          cp -R "$INSTALLER" "$LOGINITEMS/"
+        shell: /bin/bash
+        basedOnDependencyAnalysis: false
     scheme:
       testTargets:
         - CoreTests
