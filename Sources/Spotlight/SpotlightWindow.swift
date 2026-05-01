@@ -490,6 +490,12 @@ extension SpotlightWindowController {
       if findController.isVisible { findController.close() }
       if fuzzyController.isVisible { fuzzyController.close() }
       commandController.toggle(shortcuts: shortcuts, preferences: preferences)
+    case .insertTodayBadge:
+      _ = panel?.firstResponder?.tryToPerform(#selector(PlaceholderTextView.insertTodayBadgeToken(_:)), with: nil)
+    case .insertChecklist:
+      _ = panel?.firstResponder?.tryToPerform(#selector(PlaceholderTextView.insertChecklistToken(_:)), with: nil)
+    case .toggleChecklist:
+      _ = panel?.firstResponder?.tryToPerform(#selector(PlaceholderTextView.toggleChecklistShortcut(_:)), with: nil)
     case .pinNote:
       Task { await session.togglePin() }
     case .copyContent:

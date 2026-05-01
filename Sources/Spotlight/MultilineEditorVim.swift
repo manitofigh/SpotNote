@@ -147,6 +147,7 @@ extension PlaceholderTextView {
     executeMutatingVimAction(action)
   }
 
+  // swiftlint:disable:next cyclomatic_complexity
   private func executeMutatingVimAction(_ action: VimAction) {
     switch action {
     case .moveCursor(let motion): executeMotion(motion)

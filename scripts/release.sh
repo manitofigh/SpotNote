@@ -220,15 +220,34 @@ mkdir -p "$UPDATES_DIR"
 APPCAST_PATH="$UPDATES_DIR/appcast.xml"
 ENCLOSURE_BASENAME="$APP_NAME-$SHORT_VERSION.zip"
 ENCLOSURE_PATH="$UPDATES_DIR/$ENCLOSURE_BASENAME"
+RELEASE_NOTES_BASENAME="release-notes-$SHORT_VERSION.html"
+RELEASE_NOTES_PATH="$UPDATES_DIR/$RELEASE_NOTES_BASENAME"
 rm -f "$ENCLOSURE_PATH"
 ditto -c -k --keepParent "$APP_PATH" "$ENCLOSURE_PATH"
 
 UPDATES_BASE_URL="${SPOTNOTE_UPDATES_BASE_URL:-https://updates.spotnote.org}"
 ENCODED_NAME="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$ENCLOSURE_BASENAME")"
+RELEASE_NOTES_BASE_URL="${SPOTNOTE_RELEASE_NOTES_BASE_URL:-$UPDATES_BASE_URL}"
+RELEASE_NOTES_LINK="$RELEASE_NOTES_BASE_URL/$RELEASE_NOTES_BASENAME"
+
+cat > "$RELEASE_NOTES_PATH" <<HTML
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>$APP_NAME $SHORT_VERSION Release Notes</title>
+</head>
+<body>
+  <h1>$APP_NAME $SHORT_VERSION</h1>
+  <p>Build $BUILD_VERSION</p>
+  <p>Published $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
+</body>
+</html>
+HTML
 
 echo "[8/9] Generating appcast at $APPCAST_PATH..."
 RELEASE_DATE_RFC822="$(LC_ALL=C date -u +"%a, %d %b %Y %H:%M:%S +0000")"
-RELEASE_NOTES_LINK="${SPOTNOTE_RELEASE_NOTES_BASE_URL:-https://spotnote.org/releases}/$SHORT_VERSION"
 
 cat > "$APPCAST_PATH" <<XML
 <?xml version="1.0" standalone="yes"?>

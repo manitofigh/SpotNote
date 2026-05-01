@@ -17,6 +17,11 @@ struct ShortcutsPane: View {
 
       ShortcutGroup(title: "Global", actions: [.toggleHotkey, .appendToLastNote], store: shortcuts)
       ShortcutGroup(
+        title: "Editor",
+        actions: [.insertTodayBadge, .insertChecklist, .toggleChecklist],
+        store: shortcuts
+      )
+      ShortcutGroup(
         title: "Notes",
         actions: [.newChat, .olderChat, .newerChat, .deleteChat, .undoDelete, .pinNote, .copyContent],
         store: shortcuts

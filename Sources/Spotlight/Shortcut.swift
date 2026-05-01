@@ -71,6 +71,9 @@ public struct ShortcutModifierSet: OptionSet, Codable, Hashable, Sendable {
 public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiable {
   case toggleHotkey
   case appendToLastNote
+  case insertTodayBadge
+  case insertChecklist
+  case toggleChecklist
   case newChat
   case olderChat
   case newerChat
@@ -90,6 +93,9 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     switch self {
     case .toggleHotkey: return "Show / hide HUD"
     case .appendToLastNote: return "Append to most recent"
+    case .insertTodayBadge: return "Insert today badge"
+    case .insertChecklist: return "Insert checklist item"
+    case .toggleChecklist: return "Toggle checklist state"
     case .newChat: return "New note"
     case .olderChat: return "Older note"
     case .newerChat: return "Newer note"
@@ -110,6 +116,9 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .toggleHotkey: return "Global hotkey to summon SpotNote from any app."
     case .appendToLastNote:
       return "Summon the HUD on the most recently edited note with the caret already at the end."
+    case .insertTodayBadge: return "Insert @today token at the caret."
+    case .insertChecklist: return "Insert @cl token at the caret."
+    case .toggleChecklist: return "Toggle the current checklist item between empty and checked."
     case .newChat: return "Start a fresh blank note."
     case .olderChat: return "Step back through your saved notes (hold to repeat)."
     case .newerChat: return "Step forward through your saved notes (hold to repeat)."
@@ -129,6 +138,9 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     switch self {
     case .toggleHotkey: return Shortcut(key: "space", modifiers: [.command, .shift])
     case .appendToLastNote: return Shortcut(key: ".", modifiers: [.command, .shift])
+    case .insertTodayBadge: return Shortcut(key: "t", modifiers: [.command, .shift])
+    case .insertChecklist: return Shortcut(key: "l", modifiers: [.command, .shift])
+    case .toggleChecklist: return Shortcut(key: "k", modifiers: [.command, .shift])
     case .newChat: return Shortcut(key: "n", modifiers: [.command])
     case .olderChat: return Shortcut(key: "n", modifiers: [.control])
     case .newerChat: return Shortcut(key: "p", modifiers: [.control])

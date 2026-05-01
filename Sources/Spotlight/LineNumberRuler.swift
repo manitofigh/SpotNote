@@ -72,7 +72,12 @@ final class LineNumberRuler: NSRulerView {
     if !layoutManager.extraLineFragmentRect.isEmpty {
       count += 1
     }
-    return max(1, count)
+    // Immediately after inserting a trailing newline, TextKit can
+    // momentarily report no extra fragment even though the logical
+    // second line exists. Use logical-line count as a floor so row
+    // growth doesn't lag one keystroke behind.
+    let logical = max(1, textView.string.components(separatedBy: "\n").count)
+    return max(logical, count)
   }
 
   /// Glyph shown in place of a number on soft-wrapped continuation rows.
@@ -154,20 +159,20 @@ final class LineNumberRuler: NSRulerView {
   }
 
   /// Baseline y (in fragment-local coords) that matches what
-  /// `NSLayoutManager` produces for a glyph in a fixed-height fragment.
+  /// `FixedLineHeightLayoutManager.setLocation` produces for a glyph
+  /// in a fixed-height fragment.
   ///
-  /// Per `NSParagraphStyle` docs: when `minimumLineHeight` exceeds the
-  /// font's natural line height, **all** of the extra space is added
-  /// above the baseline. So:
+  /// The layout manager centers each glyph vertically within its fragment,
+  /// splitting extra space equally above and below:
   ///
-  ///     baseline = (fragmentHeight − fontHeight) + font.ascender
+  ///     baseline = font.ascender + (fragmentHeight − fontHeight) / 2
   ///
-  /// and **not** the symmetric `(fragmentHeight − fontHeight) / 2 + ascender`
-  /// that a naive "centred glyph" model would suggest.
+  /// Used for empty-buffer placeholder, inline math suggestion, extra line
+  /// fragment, and anywhere else a baseline is needed without a live glyph.
+  /// Must stay in sync with the formula in `setLocation`.
   static func synthesizedBaseline(fragmentHeight: CGFloat, font: NSFont) -> CGFloat {
     let fontHeight = font.ascender - font.descender
-    let extraSpaceAboveBaseline = max(0, fragmentHeight - fontHeight)
-    return extraSpaceAboveBaseline + font.ascender
+    return font.ascender + max(0, fragmentHeight - fontHeight) / 2
   }
 
   private func drawEmptyBufferNumber(in ctx: DrawContext) {

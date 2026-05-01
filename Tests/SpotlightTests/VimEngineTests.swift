@@ -1,3 +1,4 @@
+// swiftlint:disable type_body_length
 import Testing
 
 @testable import Spotlight

@@ -283,6 +283,7 @@ struct MultilineEditor: NSViewRepresentable {
     var lastFocusRequest: Int = -1
     var lastCaretEndRequest: Int = 0
     var lastFindHighlight: NSRange?
+    var normalizedTextAwaitingNotification: String?
 
     init(_ parent: MultilineEditor) { self.parent = parent }
 
@@ -293,6 +294,15 @@ struct MultilineEditor: NSViewRepresentable {
 
     func textDidChange(_ notification: Notification) {
       guard let textView = notification.object as? PlaceholderTextView else { return }
+      if let normalized = normalizedTextAwaitingNotification {
+        normalizedTextAwaitingNotification = nil
+        if textView.string == normalized {
+          return
+        }
+      }
+      if textView.normalizeSpecialTokens() {
+        normalizedTextAwaitingNotification = textView.string
+      }
       // Resize first -- synchronous and ahead of the SwiftUI @Binding
       // update that happens on the next runloop. Without this ordering,
       // NSTextView had the new line laid out before the panel had grown,
@@ -339,11 +349,15 @@ struct MultilineEditor: NSViewRepresentable {
   }
 
   private var fixedParagraphStyle: NSParagraphStyle {
+    MultilineEditor.sharedFixedParagraphStyle
+  }
+
+  private static let sharedFixedParagraphStyle: NSParagraphStyle = {
     let style = NSMutableParagraphStyle()
     style.minimumLineHeight = EditorMetrics.lineHeight
     style.maximumLineHeight = EditorMetrics.lineHeight
     return style
-  }
+  }()
 
   private var textAttributes: [NSAttributedString.Key: Any] {
     [
@@ -362,6 +376,13 @@ struct MultilineEditor: NSViewRepresentable {
     textView.placeholderColor = newPlaceholderColor
     textView.defaultParagraphStyle = fixedParagraphStyle
     textView.typingAttributes = textAttributes
+    textView.editorTextAttributes = textAttributes
+    textView.checkboxCheckedColor = .systemGreen.withAlphaComponent(0.95)
+    // Derive the unchecked border from the text colour rather than the placeholder.
+    // Dark themes (e.g. Obsidian): text is near-white → 0.50 opacity = visible light border.
+    // Light themes: text is near-black → 0.65 opacity = a dark, legible stroke.
+    textView.checkboxUncheckedColor = newTextColor
+      .withAlphaComponent(theme.mode == .dark ? 0.50 : 0.65)
     if let ruler = textView.enclosingScrollView?.verticalRulerView as? LineNumberRuler {
       ruler.textColor = newPlaceholderColor.withAlphaComponent(0.8)
       ruler.editorFont = font
@@ -381,6 +402,8 @@ struct MultilineEditor: NSViewRepresentable {
     else { return }
     let fixed = FixedLineHeightLayoutManager()
     fixed.fixedLineHeight = EditorMetrics.lineHeight
+    fixed.editorFont = font
+    fixed.delegate = fixed  // self-delegate for glyph-advance normalisation
     if let existing = storage.layoutManagers.first {
       storage.removeLayoutManager(existing)
     }
@@ -392,11 +415,20 @@ struct MultilineEditor: NSViewRepresentable {
     guard let storage = textView.textStorage else { return }
     let length = storage.length
     guard length > 0 else { return }
-    storage.addAttribute(
-      .paragraphStyle,
-      value: fixedParagraphStyle,
-      range: NSRange(location: 0, length: length)
-    )
+    let fullRange = NSRange(location: 0, length: length)
+    var rangesNeedingStyle: [NSRange] = []
+    storage.enumerateAttribute(.paragraphStyle, in: fullRange) { value, range, _ in
+      guard let style = value as? NSParagraphStyle,
+        style.minimumLineHeight == EditorMetrics.lineHeight,
+        style.maximumLineHeight == EditorMetrics.lineHeight
+      else {
+        rangesNeedingStyle.append(range)
+        return
+      }
+    }
+    for range in rangesNeedingStyle {
+      storage.addAttribute(.paragraphStyle, value: fixedParagraphStyle, range: range)
+    }
   }
 
   func applyCodeStyling(on textView: NSTextView) {
@@ -415,15 +447,41 @@ struct MultilineEditor: NSViewRepresentable {
       scroll.hasVerticalRuler = false
     }
   }
+
 }
 
 // MARK: - PlaceholderTextView
 
 final class PlaceholderTextView: NSTextView {
+  private enum RenderedTokenKind {
+    case today
+    case checklist
+  }
+
+  private struct RenderedToken {
+    let kind: RenderedTokenKind
+    let tokenLiteral: String
+    let reversionText: String
+    let renderedText: String
+    let renderedRange: NSRange
+  }
+  private struct EditContext {
+    let range: NSRange
+    let replacement: String?
+    let isPaste: Bool
+  }
+  private struct SuppressedTokenOccurrence {
+    let literal: String
+    let range: NSRange
+  }
+
   var placeholderString: String = ""
   var placeholderColor: NSColor = .secondaryLabelColor
   weak var suggestionField: SuggestionView?
   var pendingSuggestion: String?
+  var editorTextAttributes: [NSAttributedString.Key: Any] = [:]
+  var checkboxCheckedColor: NSColor = .systemGreen.withAlphaComponent(0.95)
+  var checkboxUncheckedColor: NSColor = .secondaryLabelColor.withAlphaComponent(0.6)
 
   var copyButtonClearance: CGFloat = 0
   /// Caret position captured when entering visual line mode. The
@@ -439,6 +497,10 @@ final class PlaceholderTextView: NSTextView {
   var vimEngine: VimEngine?
   weak var vimController: VimController?
   var onEscape: (() -> Void)?
+  private var lastRenderedToken: RenderedToken?
+  private var lastEditContext: EditContext?
+  private var isPasting = false
+  private var suppressedOccurrences: [SuppressedTokenOccurrence] = []
 
   var vimModeEnabled: Bool = false {
     didSet {
@@ -466,8 +528,15 @@ final class PlaceholderTextView: NSTextView {
   }
 
   override func keyDown(with event: NSEvent) {
+    stabilizeTypingAttributes()
     let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
     let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+    if mods == .command, chars == "z", revertLastRenderedTokenIfPossible() {
+      return
+    }
+    if mods.isEmpty, event.keyCode == 51, revertLastRenderedTokenIfPossible() {
+      return
+    }
     if let controller = vimController, controller.prompt != nil {
       if handlePromptKey(event: event, controller: controller, mods: mods) { return }
     }
@@ -494,6 +563,44 @@ final class PlaceholderTextView: NSTextView {
       return
     }
     super.keyDown(with: event)
+  }
+
+  override func deleteBackward(_ sender: Any?) {
+    if revertLastRenderedTokenIfPossible() { return }
+    super.deleteBackward(sender)
+  }
+
+  override func paste(_ sender: Any?) {
+    isPasting = true
+    defer { isPasting = false }
+    super.paste(sender)
+  }
+
+  override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+    stabilizeTypingAttributes()
+    lastEditContext = EditContext(
+      range: affectedCharRange,
+      replacement: replacementString,
+      isPaste: isPasting
+    )
+    return super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    let containerPoint = NSPoint(
+      x: point.x - textContainerOrigin.x,
+      y: point.y - textContainerOrigin.y
+    )
+    if toggleChecklistAtPoint(containerPoint) { return }
+    super.mouseDown(with: event)
+  }
+
+  override func tryToPerform(_ action: Selector, with object: Any?) -> Bool {
+    if action == Selector(("undo:")), revertLastRenderedTokenIfPossible() {
+      return true
+    }
+    return super.tryToPerform(action, with: object)
   }
 
   func shouldAcceptSuggestion(event: NSEvent) -> Bool {
@@ -598,6 +705,7 @@ final class PlaceholderTextView: NSTextView {
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
+    drawCheckboxSymbols(in: dirtyRect)
     guard string.isEmpty, !placeholderString.isEmpty else { return }
     let effectiveFont = font ?? .systemFont(ofSize: 14)
     let attrs: [NSAttributedString.Key: Any] = [
@@ -616,19 +724,59 @@ final class PlaceholderTextView: NSTextView {
     (placeholderString as NSString).draw(at: origin, withAttributes: attrs)
   }
 
+  // round(22 × 0.64) = 14 pt — (22 − 14) / 2 = 4 pt headroom each side, no clipping.
+  private var checkboxSymbolSize: CGFloat { round(EditorMetrics.lineHeight * 0.64) }
+
+  /// Draws an SF Symbol in place of each ☐/☑ glyph (which CodeStyler
+  /// hides with `.foregroundColor = .clear`). Called from `draw(_:)` so
+  /// it happens in the same graphics context as the rest of the text view.
+  private func drawCheckboxSymbols(in dirtyRect: NSRect) {
+    guard let lm = layoutManager, let tc = textContainer else { return }
+    let nsString = string as NSString
+    guard nsString.length > 0 else { return }
+    lm.ensureLayout(for: tc)
+    let size = checkboxSymbolSize
+    for charIdx in 0..<nsString.length {
+      let ch = nsString.character(at: charIdx)
+      guard ch == 0x2610 || ch == 0x2611 else { continue }
+      let glyphIdx = lm.glyphIndexForCharacter(at: charIdx)
+      let frag = lm.lineFragmentRect(forGlyphAt: glyphIdx, effectiveRange: nil)
+      guard !frag.isEmpty else { continue }
+      let fragTopInView = textContainerOrigin.y + frag.origin.y
+      guard fragTopInView + frag.height > dirtyRect.minY,
+        fragTopInView < dirtyRect.maxY
+      else { continue }
+      let isChecked = ch == 0x2611
+      // checkmark.square = outline square + checkmark, no fill.
+      // Single palette colour renders both the square border and the checkmark.
+      let symbolName = isChecked ? "checkmark.square" : "square"
+      let color = isChecked ? checkboxCheckedColor : checkboxUncheckedColor
+      let cfg = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
+        .applying(.init(paletteColors: [color]))
+      guard let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+        .withSymbolConfiguration(cfg)
+      else { continue }
+      let glyphLoc = lm.location(forGlyphAt: glyphIdx)
+      let drawX = textContainerOrigin.x + frag.origin.x + glyphLoc.x
+      let drawY = fragTopInView + (frag.height - size) / 2
+      img.draw(in: NSRect(x: drawX, y: drawY, width: size, height: size))
+    }
+  }
+
   /// Shrink the blinking caret to the font's ascender-to-descender height
-  /// rather than the full 22pt forced-line-height fragment. Sits at the
-  /// `extra space above baseline` offset so it hugs the glyphs it
-  /// annotates.
+  /// rather than the full 22pt forced-line-height fragment. The fixed
+  /// layout manager centers glyphs inside that fragment, so the caret uses
+  /// the same vertical inset.
   override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+    let rect = normalizedInsertionPointRect(rect)
     let caretFont = font ?? .systemFont(ofSize: 14)
     let fontHeight = caretFont.ascender - caretFont.descender
-    let extraSpaceAboveBaseline = max(0, rect.height - fontHeight)
+    let centeredGlyphInset = max(0, rect.height - fontHeight) / 2
     if vimEngine?.mode == .normal {
       let blockWidth = max(rect.width, 8)
       let blockRect = NSRect(
         x: rect.origin.x,
-        y: rect.origin.y + extraSpaceAboveBaseline,
+        y: rect.origin.y + centeredGlyphInset,
         width: blockWidth,
         height: fontHeight
       )
@@ -637,7 +785,7 @@ final class PlaceholderTextView: NSTextView {
     } else {
       let shrunk = NSRect(
         x: rect.origin.x,
-        y: rect.origin.y + extraSpaceAboveBaseline,
+        y: rect.origin.y + centeredGlyphInset,
         width: rect.width,
         height: fontHeight
       )
@@ -645,9 +793,349 @@ final class PlaceholderTextView: NSTextView {
     }
   }
 
+  private func normalizedInsertionPointRect(_ rect: NSRect) -> NSRect {
+    guard let layoutManager, let textContainer else { return rect }
+    layoutManager.ensureLayout(for: textContainer)
+    let nsString = string as NSString
+    guard nsString.length > 0, layoutManager.numberOfGlyphs > 0 else {
+      return NSRect(
+        x: rect.origin.x,
+        y: textContainerOrigin.y,
+        width: rect.width,
+        height: EditorMetrics.lineHeight
+      )
+    }
+    let cursor = min(selectedRange.location, nsString.length)
+    if cursor > 0, nsString.character(at: cursor - 1) == 0x0A {
+      let extra = layoutManager.extraLineFragmentRect
+      let originY: CGFloat
+      if !extra.isEmpty {
+        originY = textContainerOrigin.y + extra.origin.y
+      } else {
+        let lastGlyphIndex = max(0, layoutManager.numberOfGlyphs - 1)
+        let fragment = layoutManager.lineFragmentRect(forGlyphAt: lastGlyphIndex, effectiveRange: nil)
+        originY = textContainerOrigin.y + fragment.maxY
+      }
+      return NSRect(
+        x: rect.origin.x,
+        y: originY,
+        width: rect.width,
+        height: EditorMetrics.lineHeight
+      )
+    }
+    let characterIndex = min(max(0, cursor == nsString.length ? cursor - 1 : cursor), nsString.length - 1)
+    let glyphIndex = min(
+      layoutManager.glyphIndexForCharacter(at: characterIndex),
+      max(0, layoutManager.numberOfGlyphs - 1)
+    )
+    let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+    return NSRect(
+      x: rect.origin.x,
+      y: textContainerOrigin.y + fragment.origin.y,
+      width: rect.width,
+      height: fragment.height
+    )
+  }
+
   override func setNeedsDisplay(_ invalidRect: NSRect) {
     let dx: CGFloat = vimEngine?.mode == .normal ? -10 : 0
     super.setNeedsDisplay(invalidRect.insetBy(dx: dx, dy: -2))
+  }
+
+  @objc func insertTodayBadgeToken(_ sender: Any?) {
+    insertText("@today", replacementRange: NSRange(location: NSNotFound, length: 0))
+  }
+
+  @objc func insertChecklistToken(_ sender: Any?) {
+    insertText("@cl", replacementRange: NSRange(location: NSNotFound, length: 0))
+  }
+
+  @objc func toggleChecklistShortcut(_ sender: Any?) {
+    toggleChecklistAtCurrentLine()
+  }
+
+  // swiftlint:disable opening_brace
+  func normalizeSpecialTokens() -> Bool {
+    let original = string
+    var updated = original
+    var targetSelection = selectedRange
+    var renderedToken: RenderedToken?
+    let originalNS = original as NSString
+
+    guard let edit = lastEditContext else { return false }
+    lastEditContext = nil
+    if edit.isPaste { return false }
+    pruneSuppressedOccurrences(after: edit, in: originalNS)
+
+    if let replacement = edit.replacement,
+      replacement.count == 1 || replacement == "@today" || replacement == "@cl"
+    {
+      let caret = selectedRange.location
+      if let tokenRange = originalNS.trailingTokenRange("@today", endingAt: caret),
+        !isSuppressed(literal: "@today", range: tokenRange, in: originalNS)
+      {
+        let date = Self.todayDisplayString()
+        updated = originalNS.replacingCharacters(in: tokenRange, with: date)
+        renderedToken = RenderedToken(
+          kind: .today,
+          tokenLiteral: "@today",
+          reversionText: "@today",
+          renderedText: date,
+          renderedRange: NSRange(location: tokenRange.location, length: (date as NSString).length)
+        )
+        targetSelection = NSRange(location: tokenRange.location + (date as NSString).length, length: 0)
+      } else if let tokenRange = originalNS.trailingTokenRange("@cl", endingAt: caret),
+        !isSuppressed(literal: "@cl", range: tokenRange, in: originalNS),
+        !originalNS.lineContainsCheckbox(at: tokenRange.location)
+      {
+        let replacementText = "☐ "
+        updated = originalNS.replacingCharacters(in: tokenRange, with: replacementText)
+        renderedToken = RenderedToken(
+          kind: .checklist,
+          tokenLiteral: "@cl",
+          reversionText: "[]",
+          renderedText: replacementText,
+          renderedRange: NSRange(
+            location: tokenRange.location,
+            length: (replacementText as NSString).length
+          )
+        )
+        targetSelection = NSRange(
+          location: tokenRange.location + (replacementText as NSString).length,
+          length: 0
+        )
+      }
+    }
+
+    guard updated != original else { return false }
+    replaceContentPreservingEditorAttributes(with: updated)
+    let clamped = min(targetSelection.location, (updated as NSString).length)
+    setInsertionPoint(clamped)
+    lastRenderedToken = renderedToken
+    return true
+  }
+  // swiftlint:enable opening_brace
+
+  private static func todayDisplayString() -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "d MMMM yyyy"
+    return formatter.string(from: Date())
+  }
+
+  private func toggleChecklistAtCurrentLine() {
+    let nsString = string as NSString
+    let line = nsString.lineRange(for: NSRange(location: selectedRange.location, length: 0))
+    let caretInLine = selectedRange.location - line.location
+    guard toggleChecklist(in: line, targetOffset: caretInLine) else { return }
+  }
+
+  private func revertLastRenderedTokenIfPossible() -> Bool {
+    guard let token = lastRenderedToken else { return false }
+    let currentNS = string as NSString
+    let max = token.renderedRange.location + token.renderedRange.length
+    guard max <= currentNS.length else {
+      lastRenderedToken = nil
+      return false
+    }
+    let live = currentNS.substring(with: token.renderedRange)
+    guard live == token.renderedText else {
+      lastRenderedToken = nil
+      return false
+    }
+    let caret = selectedRange.location
+    let originalTokenEnd = token.renderedRange.location + (token.tokenLiteral as NSString).length
+    let canRevert =
+      selectedRange.length == 0
+      && (caret == max || (caret == originalTokenEnd && originalTokenEnd <= currentNS.length))
+    guard canRevert else { return false }
+    if shouldChangeText(in: token.renderedRange, replacementString: token.reversionText) {
+      replaceCharacters(in: token.renderedRange, with: token.reversionText)
+      let location = token.renderedRange.location + (token.reversionText as NSString).length
+      suppressedOccurrences.append(
+        SuppressedTokenOccurrence(
+          literal: token.reversionText,
+          range: NSRange(
+            location: token.renderedRange.location,
+            length: (token.reversionText as NSString).length
+          )
+        )
+      )
+      setInsertionPoint(location)
+      lastRenderedToken = nil
+      didChangeText()
+      return true
+    }
+    return false
+  }
+
+  private func replaceContentPreservingEditorAttributes(with updated: String) {
+    guard let storage = textStorage else {
+      string = updated
+      return
+    }
+    let range = NSRange(location: 0, length: storage.length)
+    let attributed = NSAttributedString(string: updated, attributes: typingAttributes)
+    storage.beginEditing()
+    storage.replaceCharacters(in: range, with: attributed)
+    storage.endEditing()
+    if let textContainer {
+      layoutManager?.ensureLayout(for: textContainer)
+    }
+  }
+
+  /// Toggles the checkbox only when `containerPoint` lands within the
+  /// SF Symbol's drawn rect ± `hitPadding` horizontally (full line height
+  /// vertically — the user doesn't need sub-pixel vertical precision).
+  /// Clicking anywhere else on the line falls through to normal cursor
+  /// placement via `super.mouseDown`.
+  private func toggleChecklistAtPoint(_ containerPoint: NSPoint) -> Bool {
+    guard let lm = layoutManager, let tc = textContainer else { return false }
+    let nsString = string as NSString
+    guard nsString.length > 0 else { return false }
+    lm.ensureLayout(for: tc)
+    let size = checkboxSymbolSize
+    let hitPadding: CGFloat = 6
+    for charIdx in 0..<nsString.length {
+      let ch = nsString.character(at: charIdx)
+      guard ch == 0x2610 || ch == 0x2611 else { continue }
+      let glyphIdx = lm.glyphIndexForCharacter(at: charIdx)
+      let frag = lm.lineFragmentRect(forGlyphAt: glyphIdx, effectiveRange: nil)
+      guard !frag.isEmpty else { continue }
+      let glyphLoc = lm.location(forGlyphAt: glyphIdx)
+      let symX = frag.origin.x + glyphLoc.x
+      let hitRect = NSRect(
+        x: symX - hitPadding,
+        y: frag.origin.y,
+        width: size + hitPadding * 2,
+        height: frag.height
+      )
+      guard hitRect.contains(containerPoint) else { continue }
+      let line = nsString.lineRange(for: NSRange(location: charIdx, length: 0))
+      return toggleChecklist(in: line, targetOffset: charIdx - line.location)
+    }
+    return false
+  }
+
+  @discardableResult
+  private func toggleChecklist(in lineRange: NSRange, targetOffset: Int) -> Bool {
+    let nsString = string as NSString
+    let lineText = nsString.substring(with: lineRange)
+    guard let markerRange = checklistMarkerRange(in: lineText, near: targetOffset) else { return false }
+    let nsLine = lineText as NSString
+    let marker = nsLine.substring(with: markerRange)
+    let replacement = marker == "☐" ? "☑" : "☐"
+    let absoluteRange = NSRange(location: lineRange.location + markerRange.location, length: markerRange.length)
+    if shouldChangeText(in: absoluteRange, replacementString: replacement) {
+      replaceCharacters(in: absoluteRange, with: replacement)
+      didChangeText()
+      return true
+    }
+    return false
+  }
+
+  private func checklistMarkerRange(in lineText: String, near targetOffset: Int) -> NSRange? {
+    let nsLine = lineText as NSString
+    var matches: [NSRange] = []
+    for index in 0..<nsLine.length {
+      let character = nsLine.character(at: index)
+      if character == 0x2610 || character == 0x2611 {
+        matches.append(NSRange(location: index, length: 1))
+      }
+    }
+    if matches.isEmpty { return nil }
+    if let containing = matches.first(where: { NSLocationInRange(targetOffset, $0) }) {
+      return containing
+    }
+    return matches.min { lhs, rhs in
+      abs(lhs.location - targetOffset) < abs(rhs.location - targetOffset)
+    }
+  }
+
+  private func stabilizeTypingAttributes() {
+    guard !editorTextAttributes.isEmpty else { return }
+    typingAttributes = editorTextAttributes
+  }
+
+  override func copy(_ sender: Any?) {
+    if selectedRange.length == 0 {
+      super.copy(sender)
+      return
+    }
+    let nsString = string as NSString
+    let raw = nsString.substring(with: selectedRange)
+    let lines = raw.components(separatedBy: "\n").map { line -> String in
+      if line.hasPrefix("☑ ") { return "[x] " + String(line.dropFirst(2)) }
+      if line == "☑" { return "[x]" }
+      if line.hasPrefix("☐ ") { return "[ ] " + String(line.dropFirst(2)) }
+      if line == "☐" { return "[ ]" }
+      return line
+    }
+    let mapped = lines.joined(separator: "\n")
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(mapped, forType: .string)
+  }
+
+  private func isSuppressed(literal: String, range: NSRange, in nsString: NSString) -> Bool {
+    suppressedOccurrences = suppressedOccurrences.filter { item in
+      let max = item.range.location + item.range.length
+      guard max <= nsString.length else { return false }
+      return nsString.substring(with: item.range) == item.literal
+    }
+    return suppressedOccurrences.contains {
+      $0.literal == literal && NSEqualRanges($0.range, range)
+    }
+  }
+
+  private func pruneSuppressedOccurrences(after edit: EditContext, in nsString: NSString) {
+    suppressedOccurrences = suppressedOccurrences.filter { item in
+      let max = item.range.location + item.range.length
+      guard max <= nsString.length, nsString.substring(with: item.range) == item.literal else {
+        return false
+      }
+      if edit.replacement == item.literal, edit.range.location == item.range.location {
+        return true
+      }
+      if edit.range.length > 0 {
+        return NSIntersectionRange(edit.range, item.range).length == 0
+      }
+      return edit.range.location <= item.range.location || edit.range.location >= max
+    }
+  }
+
+  private func setInsertionPoint(_ location: Int) {
+    setSelectedRange(
+      NSRange(location: location, length: 0),
+      affinity: .downstream,
+      stillSelecting: false
+    )
+  }
+
+}
+
+extension String {
+  var matchesDateLine: Bool {
+    range(of: #"^\d{1,2}\s+[A-Za-z]+\s+\d{4}$"#, options: .regularExpression) != nil
+  }
+}
+
+extension NSString {
+  func trailingTokenRange(_ token: String, endingAt caret: Int) -> NSRange? {
+    let tokenLen = (token as NSString).length
+    guard caret >= tokenLen else { return nil }
+    let start = caret - tokenLen
+    guard start + tokenLen <= length else { return nil }
+    let candidate = substring(with: NSRange(location: start, length: tokenLen))
+    return candidate == token ? NSRange(location: start, length: tokenLen) : nil
+  }
+
+  func lineContainsCheckbox(at position: Int) -> Bool {
+    let line = lineRange(for: NSRange(location: position, length: 0))
+    for i in 0..<line.length {
+      let ch = character(at: line.location + i)
+      if ch == 0x2610 || ch == 0x2611 { return true }
+    }
+    return false
   }
 }
 
@@ -690,6 +1178,11 @@ final class SuggestionView: NSView {
 /// default typesetter, causing visually uneven spacing between lines.
 final class FixedLineHeightLayoutManager: NSLayoutManager {
   var fixedLineHeight: CGFloat = EditorMetrics.lineHeight
+  /// Cached editor font used for baseline centering. Avoids looking up
+  /// `at: 0` from storage on every glyph placement, which is fragile
+  /// when position 0 holds a Unicode character (e.g. ☐) that triggers
+  /// system font substitution and produces wrong ascender metrics.
+  var editorFont: NSFont = .systemFont(ofSize: EditorMetrics.fontSize)
 
   override func setLineFragmentRect(
     _ fragmentRect: NSRect,
@@ -697,24 +1190,112 @@ final class FixedLineHeightLayoutManager: NSLayoutManager {
     usedRect: NSRect
   ) {
     var frag = fragmentRect
+    // Derive origin.y from the previously stored rect so the typesetter's
+    // internal Y-tracker (which advances by the glyph's *natural* height,
+    // not our overridden height) cannot push subsequent lines off-grid.
+    // Without this, a substituted-font glyph on line N (e.g. ☐) causes
+    // line N+1 to land at natural_height instead of fixedLineHeight, and
+    // the next partial re-layout corrects it — producing the visible shift.
+    if glyphRange.location == 0 {
+      frag.origin.y = 0
+    } else {
+      let prevFrag = lineFragmentRect(forGlyphAt: glyphRange.location - 1, effectiveRange: nil)
+      if !prevFrag.isEmpty {
+        frag.origin.y = prevFrag.maxY
+      }
+    }
     frag.size.height = fixedLineHeight
     var used = usedRect
+    used.origin.y = frag.origin.y
     used.size.height = fixedLineHeight
     super.setLineFragmentRect(frag, forGlyphRange: glyphRange, usedRect: used)
+  }
+
+  override func setExtraLineFragmentRect(
+    _ fragmentRect: NSRect,
+    usedRect: NSRect,
+    textContainer: NSTextContainer
+  ) {
+    var frag = fragmentRect
+    var used = usedRect
+    if numberOfGlyphs > 0 {
+      let lastFrag = lineFragmentRect(forGlyphAt: numberOfGlyphs - 1, effectiveRange: nil)
+      if !lastFrag.isEmpty {
+        frag.origin.y = lastFrag.maxY
+        used.origin.y = frag.origin.y
+      }
+    }
+    frag.size.height = fixedLineHeight
+    used.size.height = fixedLineHeight
+    super.setExtraLineFragmentRect(frag, usedRect: used, textContainer: textContainer)
   }
 
   override func setLocation(
     _ location: NSPoint,
     forStartOfGlyphRange glyphRange: NSRange
   ) {
-    let font =
-      textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
-      ?? .systemFont(ofSize: EditorMetrics.fontSize)
-    let naturalHeight = font.ascender - font.descender
-    let fixedY = font.ascender + (fixedLineHeight - naturalHeight) / 2
+    let naturalHeight = editorFont.ascender - editorFont.descender
+    let fixedY = editorFont.ascender + (fixedLineHeight - naturalHeight) / 2
     super.setLocation(
       NSPoint(x: location.x, y: fixedY),
       forStartOfGlyphRange: glyphRange
     )
+  }
+
+}
+
+// MARK: - FixedLineHeightLayoutManager + NSLayoutManagerDelegate
+
+/// Uses self-delegation to normalise the glyph advance of ☑ (U+2611) to
+/// match ☐ (U+2610). Both characters are rendered invisible by CodeStyler
+/// (`.foregroundColor = .clear`) and replaced visually with SF Symbols, so
+/// the actual glyph drawn is irrelevant. What matters is that both share
+/// the same advance width so toggling a checkbox never shifts text to its right.
+extension FixedLineHeightLayoutManager: NSLayoutManagerDelegate {
+  func layoutManager(
+    _ layoutManager: NSLayoutManager,
+    shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
+    properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
+    characterIndexes charIndexes: UnsafePointer<Int>,
+    font aFont: NSFont,
+    forGlyphRange glyphRange: NSRange
+  ) -> Int {
+    guard let storage = textStorage else { return 0 }
+    let nsString = storage.string as NSString
+
+    // Fast-path: no ☑ in range → nothing to substitute
+    var hasChecked = false
+    for i in 0..<glyphRange.length where charIndexes[i] < nsString.length {
+      if nsString.character(at: charIndexes[i]) == 0x2611 { hasChecked = true; break }
+    }
+    guard hasChecked else { return 0 }
+
+    // Resolve ☐'s glyph in the current font so we can reuse it for ☑
+    var uncheckedChar: UniChar = 0x2610
+    var uncheckedGlyph: CGGlyph = 0
+    guard CTFontGetGlyphsForCharacters(aFont as CTFont, &uncheckedChar, &uncheckedGlyph, 1),
+      uncheckedGlyph != 0 else { return 0 }
+
+    var newGlyphs = Array(UnsafeBufferPointer(start: glyphs, count: glyphRange.length))
+    for i in 0..<glyphRange.length {
+      guard charIndexes[i] < nsString.length,
+        nsString.character(at: charIndexes[i]) == 0x2611 else { continue }
+      newGlyphs[i] = uncheckedGlyph
+    }
+
+    let propsArr = Array(UnsafeBufferPointer(start: props, count: glyphRange.length))
+    let charArr = Array(UnsafeBufferPointer(start: charIndexes, count: glyphRange.length))
+    newGlyphs.withUnsafeBufferPointer { gp in
+      propsArr.withUnsafeBufferPointer { pp in
+        charArr.withUnsafeBufferPointer { cp in
+          setGlyphs(
+            gp.baseAddress!, properties: pp.baseAddress!,
+            characterIndexes: cp.baseAddress!, font: aFont,
+            forGlyphRange: glyphRange
+          )
+        }
+      }
+    }
+    return glyphRange.length
   }
 }

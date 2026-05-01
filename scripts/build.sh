@@ -33,8 +33,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundleName</key>                    <string>SpotNote</string>
   <key>CFBundleDisplayName</key>             <string>SpotNote</string>
   <key>CFBundlePackageType</key>             <string>APPL</string>
-  <key>CFBundleShortVersionString</key>      <string>0.1.0</string>
-  <key>CFBundleVersion</key>                 <string>1</string>
+  <key>CFBundleShortVersionString</key>      <string>0.2.0</string>
+  <key>CFBundleVersion</key>                 <string>2</string>
   <key>LSMinimumSystemVersion</key>          <string>14.0</string>
   <key>LSUIElement</key>                     <true/>
   <key>CFBundleIconFile</key>                <string>AppIcon</string>
@@ -69,11 +69,20 @@ if ! otool -l "$MACOS/SpotNote" | grep -q "@executable_path/../Frameworks"; then
 fi
 
 echo "==> codesigning (ad-hoc)"
-# Frameworks must be signed before the app, otherwise the outer signature
-# is invalidated when dyld loads them.
+# Sparkle.framework's top-level path can be ambiguous to `codesign`
+# ("could be app or framework"). Sign concrete Versions/* bundles first.
+shopt -s nullglob
 for fw in "$FRAMEWORKS_DIR"/*.framework; do
-  codesign --force --sign - "$fw" >/dev/null
+  if [[ -d "$fw/Versions" ]]; then
+    for version_dir in "$fw"/Versions/*; do
+      [[ -d "$version_dir" ]] || continue
+      codesign --force --sign - "$version_dir" >/dev/null
+    done
+  else
+    codesign --force --sign - "$fw" >/dev/null
+  fi
 done
+shopt -u nullglob
 codesign --force --sign - "$APP_DIR" >/dev/null
 
 echo "OK: $APP_DIR"

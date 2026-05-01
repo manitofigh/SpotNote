@@ -8,8 +8,8 @@ import Testing
 struct LineNumberRulerTests {
   // MARK: - synthesizedBaseline
 
-  @Test("synthesizedBaseline places all extra vertical space above the baseline")
-  func extraSpaceSitsAboveBaseline() {
+  @Test("synthesizedBaseline centers the glyph by splitting extra space equally above and below")
+  func extraSpaceSplitEqually() {
     let font = NSFont.systemFont(ofSize: 16)
     let fragmentHeight: CGFloat = 22
     let baseline = LineNumberRuler.synthesizedBaseline(
@@ -17,7 +17,8 @@ struct LineNumberRulerTests {
       font: font
     )
     let fontHeight = font.ascender - font.descender
-    let expected = (fragmentHeight - fontHeight) + font.ascender
+    // Matches FixedLineHeightLayoutManager.setLocation: ascender + (extra / 2)
+    let expected = font.ascender + (fragmentHeight - fontHeight) / 2
     #expect(abs(baseline - expected) < 0.001)
   }
 
@@ -40,13 +41,14 @@ struct LineNumberRulerTests {
     #expect(abs(baseline - font.ascender) < 0.001)
   }
 
-  @Test("synthesizedBaseline grows 1:1 with fragment height beyond the font height")
+  @Test("synthesizedBaseline grows 0.5:1 with fragment height beyond the font height")
   func baselineGrowsWithFragment() {
     let font = NSFont.systemFont(ofSize: 16)
     let small = LineNumberRuler.synthesizedBaseline(fragmentHeight: 22, font: font)
     let large = LineNumberRuler.synthesizedBaseline(fragmentHeight: 32, font: font)
-    // 10pt of extra fragment height adds 10pt to the baseline.
-    #expect(abs((large - small) - 10) < 0.001)
+    // Centering: 10pt of extra fragment height adds 5pt to the baseline
+    // (half the extra space goes above, half below).
+    #expect(abs((large - small) - 5) < 0.001)
   }
 
   // MARK: - thickness(forLineCount:labelSize:)

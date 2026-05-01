@@ -33,6 +33,7 @@ enum CodeStyler {
     layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
     guard fullRange.length > 0 else { return }
     let palette = palette(for: theme)
+    styleChecklist(in: nsText, fullRange: fullRange, layoutManager: layoutManager)
     let processed = styleTriples(
       in: nsText,
       fullRange: fullRange,
@@ -155,6 +156,22 @@ enum CodeStyler {
     case .string: return palette.string
     case .number: return palette.number
     case .comment: return palette.comment
+    }
+  }
+
+  private static func styleChecklist(
+    in nsText: NSString,
+    fullRange: NSRange,
+    layoutManager: NSLayoutManager
+  ) {
+    guard let regex = try? NSRegularExpression(pattern: #"(☐|☑)"#) else { return }
+    regex.enumerateMatches(in: nsText as String, range: fullRange) { match, _, _ in
+      guard let marker = match?.range(at: 1) else { return }
+      // Suppress the raw Unicode glyph; PlaceholderTextView draws the
+      // polished SF Symbol at the same position via its draw(_:) override.
+      layoutManager.addTemporaryAttribute(
+        .foregroundColor, value: NSColor.clear, forCharacterRange: marker
+      )
     }
   }
 
