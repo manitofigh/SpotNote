@@ -260,6 +260,17 @@ private struct GeneralPane: View {
 
       SettingsCard {
         SettingsToggleRow(
+          title: "Launch at login",
+          subtitle: "Start SpotNote in the background when you log in to your Mac.",
+          isOn: Binding(
+            get: { preferences.launchAtLogin },
+            set: { preferences.launchAtLogin = $0 }
+          )
+        )
+
+        SettingsDivider()
+
+        SettingsToggleRow(
           title: "Menu bar icon",
           subtitle: "Show the SpotNote icon in the macOS menu bar.",
           isOn: Binding(

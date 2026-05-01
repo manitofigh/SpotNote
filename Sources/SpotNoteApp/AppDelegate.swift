@@ -42,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     DockIconSwitcher.applyVisibility(preferences.showDockIcon)
     MainMenu.install(onOpenSettings: { [weak self] in self?.settings.show() })
 
+    enableLaunchAtLoginIfFirstRun()
+
     menuBar = MenuBarController(
       preferences: preferences,
       onOpenSettings: { [weak self] in self?.settings.show() }
@@ -165,6 +167,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       semaphore.signal()
     }
     _ = semaphore.wait(timeout: .now() + .milliseconds(800))
+  }
+
+  /// Opt every new install into background autostart so the global
+  /// hotkey works after a reboot without any setup. Subsequent launches
+  /// respect whatever the user toggles in Settings.
+  private func enableLaunchAtLoginIfFirstRun() {
+    let key = "launchAtLogin.didInitialize"
+    let defaults = UserDefaults.standard
+    guard defaults.object(forKey: key) == nil else { return }
+    defaults.set(true, forKey: key)
+    if LaunchAtLogin.setEnabled(true) {
+      preferences.launchAtLogin = true
+    }
   }
 
   private func applyToggleHotkey(_ shortcut: Shortcut) {

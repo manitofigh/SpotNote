@@ -46,6 +46,22 @@ public final class ThemePreferences: ObservableObject {
     didSet { defaults.set(showDockIcon, forKey: Key.showDockIcon) }
   }
 
+  /// Backed by `SMAppService.mainApp`, not `UserDefaults`: the system
+  /// owns the source of truth and may revoke the registration if the
+  /// user disables it from System Settings.
+  @Published public var launchAtLogin: Bool {
+    didSet {
+      guard launchAtLogin != oldValue else { return }
+      let applied = LaunchAtLogin.setEnabled(launchAtLogin)
+      if !applied {
+        let actual = LaunchAtLogin.isEnabled
+        if actual != launchAtLogin {
+          launchAtLogin = actual
+        }
+      }
+    }
+  }
+
   @Published public var dockIconStyle: DockIconStyle {
     didSet { defaults.set(dockIconStyle.rawValue, forKey: Key.dockIconStyle) }
   }
@@ -89,6 +105,7 @@ public final class ThemePreferences: ObservableObject {
     self.showHints = Self.boolOrDefault(defaults, Key.showHints, default: true)
     self.vimMode = Self.boolOrDefault(defaults, Key.vimMode, default: false)
     self.showDockIcon = Self.boolOrDefault(defaults, Key.showDockIcon, default: false)
+    self.launchAtLogin = LaunchAtLogin.isEnabled
     let storedStyle = defaults.string(forKey: Key.dockIconStyle) ?? DockIconStyle.dark.rawValue
     self.dockIconStyle = DockIconStyle(rawValue: storedStyle) ?? .dark
     self.dimOnFocusLoss = Self.boolOrDefault(defaults, Key.dimOnFocusLoss, default: false)
