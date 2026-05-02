@@ -153,6 +153,7 @@ extension PlaceholderTextView {
     case .moveCursor(let motion): executeMotion(motion)
     case .delete(let motion): executeDeleteMotion(motion)
     case .deleteLine(let count): executeDeleteLines(count)
+    case .deleteLineInsert(let count): executeDeleteLinesInsert(count)
     case .deleteChar(let count): executeDeleteChar(count)
     case .undo(let count):
       for _ in 0..<count { undoManager?.undo() }

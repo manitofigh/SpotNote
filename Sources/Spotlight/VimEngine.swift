@@ -28,6 +28,7 @@ enum VimAction: Equatable, Sendable {
   case moveCursor(Motion)
   case delete(Motion)
   case deleteLine(count: Int)
+  case deleteLineInsert(count: Int)
   case deleteToEndOfLine
   case deleteChar(count: Int)
   case openLineBelow
@@ -106,6 +107,14 @@ final class VimEngine {
       if key == "d" { return .deleteLine(count: count) }
       if let motion = motionForKey(key, count: count) { return .delete(motion) }
       return .none
+    case "c":
+      pendingBuffer = ""
+      if key == "c" {
+        mode = .insert
+        return .deleteLineInsert(count: count)
+      }
+      if let motion = motionForKey(key, count: count) { return .delete(motion) }
+      return .none
     case "g":
       pendingBuffer = ""
       if key == "g" { return .moveCursor(.documentStart) }
@@ -117,7 +126,7 @@ final class VimEngine {
   }
 
   private func handleSingle(key: String) -> VimAction {
-    if key == "d" || key == "g" {
+    if key == "d" || key == "g" || key == "c" {
       pendingBuffer = key
       return .none
     }

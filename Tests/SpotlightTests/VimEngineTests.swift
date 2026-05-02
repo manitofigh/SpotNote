@@ -213,6 +213,23 @@ struct VimEngineTests {
     #expect(engine.handle(key: "d", hasModifiers: false) == .deleteLine(count: 3))
   }
 
+  @Test("cc deletes current line and enters insert")
+  func ccDeleteLineInsert() {
+    let engine = VimEngine()
+    _ = engine.handle(key: "c", hasModifiers: false)
+    #expect(engine.handle(key: "c", hasModifiers: false) == .deleteLineInsert(count: 1))
+    #expect(engine.mode == .insert)
+  }
+
+  @Test("3cc deletes 3 lines and enters insert")
+  func countCC() {
+    let engine = VimEngine()
+    _ = engine.handle(key: "3", hasModifiers: false)
+    _ = engine.handle(key: "c", hasModifiers: false)
+    #expect(engine.handle(key: "c", hasModifiers: false) == .deleteLineInsert(count: 3))
+    #expect(engine.mode == .insert)
+  }
+
   @Test("dw deletes a word forward")
   func dw() {
     let engine = VimEngine()

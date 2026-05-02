@@ -381,7 +381,8 @@ struct MultilineEditor: NSViewRepresentable {
     // Derive the unchecked border from the text colour rather than the placeholder.
     // Dark themes (e.g. Obsidian): text is near-white → 0.50 opacity = visible light border.
     // Light themes: text is near-black → 0.65 opacity = a dark, legible stroke.
-    textView.checkboxUncheckedColor = newTextColor
+    textView.checkboxUncheckedColor =
+      newTextColor
       .withAlphaComponent(theme.mode == .dark ? 0.50 : 0.65)
     if let ruler = textView.enclosingScrollView?.verticalRulerView as? LineNumberRuler {
       ruler.textColor = newPlaceholderColor.withAlphaComponent(0.8)
@@ -624,6 +625,10 @@ final class PlaceholderTextView: NSTextView {
   }
 
   func executeMotion(_ motion: Motion) {
+    if let delta = logicalLineDelta(for: motion) {
+      moveByLogicalLines(delta)
+      return
+    }
     if let (selector, count) = repeatedMotion(motion) {
       for _ in 0..<count { selector(self) }
       return
@@ -645,13 +650,68 @@ final class PlaceholderTextView: NSTextView {
     switch motion {
     case .left(let count): return (moveBackward(_:), count)
     case .right(let count): return (moveForward(_:), count)
-    case .up(let count): return (moveUp(_:), count)
-    case .down(let count): return (moveDown(_:), count)
     case .wordForward(let count), .wordEnd(let count):
       return (moveWordForward(_:), count)
     case .wordBackward(let count): return (moveWordBackward(_:), count)
     default: return nil
     }
+  }
+
+  private func logicalLineDelta(for motion: Motion) -> Int? {
+    if case .up(let count) = motion { return -count }
+    if case .down(let count) = motion { return count }
+    return nil
+  }
+
+  private func moveByLogicalLines(_ delta: Int) {
+    guard delta != 0 else { return }
+    let nsString = string as NSString
+    guard nsString.length > 0 else { return }
+    let lines = logicalLineRanges(in: nsString)
+    guard !lines.isEmpty else { return }
+    let cursor = min(selectedRange.location, nsString.length)
+    let currentIndex = logicalLineIndex(containing: cursor, in: lines)
+    let currentLine = lines[currentIndex]
+    let column = max(0, cursor - currentLine.location)
+    let targetIndex = min(max(0, currentIndex + delta), lines.count - 1)
+    let targetLine = lines[targetIndex]
+    let targetEnd = lineContentEnd(targetLine, in: nsString)
+    setInsertionPoint(min(targetLine.location + column, targetEnd))
+  }
+
+  private func logicalLineRanges(in nsString: NSString) -> [NSRange] {
+    var ranges: [NSRange] = []
+    var location = 0
+    while location < nsString.length {
+      let range = nsString.lineRange(for: NSRange(location: location, length: 0))
+      ranges.append(range)
+      let next = range.location + range.length
+      guard next > location else { break }
+      location = next
+    }
+    if nsString.length > 0, nsString.character(at: nsString.length - 1) == 0x0A {
+      ranges.append(NSRange(location: nsString.length, length: 0))
+    }
+    return ranges
+  }
+
+  private func logicalLineIndex(containing cursor: Int, in lines: [NSRange]) -> Int {
+    for (index, line) in lines.enumerated() {
+      if cursor >= line.location, cursor < line.location + line.length {
+        return index
+      }
+    }
+    return max(0, lines.count - 1)
+  }
+
+  private func lineContentEnd(_ line: NSRange, in nsString: NSString) -> Int {
+    var end = line.location + line.length
+    while end > line.location {
+      let ch = nsString.character(at: end - 1)
+      guard ch == 0x0A || ch == 0x0D else { break }
+      end -= 1
+    }
+    return end
   }
 
   func executeDeleteMotion(_ motion: Motion) {
@@ -682,6 +742,11 @@ final class PlaceholderTextView: NSTextView {
     let cursorAfter = min(range.location, max(0, nsString.length - range.length))
     insertText("", replacementRange: range)
     setSelectedRange(NSRange(location: cursorAfter, length: 0))
+  }
+
+  func executeDeleteLinesInsert(_ count: Int) {
+    executeDeleteLines(count)
+    executeVimAction(.switchToInsert)
   }
 
   private func moveToFirstNonBlank() {
@@ -753,8 +818,9 @@ final class PlaceholderTextView: NSTextView {
       let color = isChecked ? checkboxCheckedColor : checkboxUncheckedColor
       let cfg = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
         .applying(.init(paletteColors: [color]))
-      guard let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-        .withSymbolConfiguration(cfg)
+      guard
+        let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+          .withSymbolConfiguration(cfg)
       else { continue }
       let glyphLoc = lm.location(forGlyphAt: glyphIdx)
       let drawX = textContainerOrigin.x + frag.origin.x + glyphLoc.x
@@ -793,7 +859,7 @@ final class PlaceholderTextView: NSTextView {
     }
   }
 
-  private func normalizedInsertionPointRect(_ rect: NSRect) -> NSRect {
+  func normalizedInsertionPointRect(_ rect: NSRect) -> NSRect {
     guard let layoutManager, let textContainer else { return rect }
     layoutManager.ensureLayout(for: textContainer)
     let nsString = string as NSString
@@ -806,7 +872,7 @@ final class PlaceholderTextView: NSTextView {
       )
     }
     let cursor = min(selectedRange.location, nsString.length)
-    if cursor > 0, nsString.character(at: cursor - 1) == 0x0A {
+    if cursor == nsString.length, cursor > 0, nsString.character(at: cursor - 1) == 0x0A {
       let extra = layoutManager.extraLineFragmentRect
       let originY: CGFloat
       if !extra.isEmpty {
@@ -888,12 +954,12 @@ final class PlaceholderTextView: NSTextView {
         !isSuppressed(literal: "@cl", range: tokenRange, in: originalNS),
         !originalNS.lineContainsCheckbox(at: tokenRange.location)
       {
-        let replacementText = "☐ "
+        let replacementText = "☐"
         updated = originalNS.replacingCharacters(in: tokenRange, with: replacementText)
         renderedToken = RenderedToken(
           kind: .checklist,
           tokenLiteral: "@cl",
-          reversionText: "[]",
+          reversionText: "[ ]",
           renderedText: replacementText,
           renderedRange: NSRange(
             location: tokenRange.location,
@@ -1067,7 +1133,7 @@ final class PlaceholderTextView: NSTextView {
     let lines = raw.components(separatedBy: "\n").map { line -> String in
       if line.hasPrefix("☑ ") { return "[x] " + String(line.dropFirst(2)) }
       if line == "☑" { return "[x]" }
-      if line.hasPrefix("☐ ") { return "[ ] " + String(line.dropFirst(2)) }
+      if line.hasPrefix("☐") { return "[ ]" + String(line.dropFirst(2)) }
       if line == "☐" { return "[ ]" }
       return line
     }
@@ -1252,6 +1318,7 @@ final class FixedLineHeightLayoutManager: NSLayoutManager {
 /// the actual glyph drawn is irrelevant. What matters is that both share
 /// the same advance width so toggling a checkbox never shifts text to its right.
 extension FixedLineHeightLayoutManager: NSLayoutManagerDelegate {
+  // swiftlint:disable:next function_parameter_count
   func layoutManager(
     _ layoutManager: NSLayoutManager,
     shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
@@ -1266,7 +1333,10 @@ extension FixedLineHeightLayoutManager: NSLayoutManagerDelegate {
     // Fast-path: no ☑ in range → nothing to substitute
     var hasChecked = false
     for i in 0..<glyphRange.length where charIndexes[i] < nsString.length {
-      if nsString.character(at: charIndexes[i]) == 0x2611 { hasChecked = true; break }
+      if nsString.character(at: charIndexes[i]) == 0x2611 {
+        hasChecked = true
+        break
+      }
     }
     guard hasChecked else { return 0 }
 
@@ -1274,12 +1344,14 @@ extension FixedLineHeightLayoutManager: NSLayoutManagerDelegate {
     var uncheckedChar: UniChar = 0x2610
     var uncheckedGlyph: CGGlyph = 0
     guard CTFontGetGlyphsForCharacters(aFont as CTFont, &uncheckedChar, &uncheckedGlyph, 1),
-      uncheckedGlyph != 0 else { return 0 }
+      uncheckedGlyph != 0
+    else { return 0 }
 
     var newGlyphs = Array(UnsafeBufferPointer(start: glyphs, count: glyphRange.length))
     for i in 0..<glyphRange.length {
       guard charIndexes[i] < nsString.length,
-        nsString.character(at: charIndexes[i]) == 0x2611 else { continue }
+        nsString.character(at: charIndexes[i]) == 0x2611
+      else { continue }
       newGlyphs[i] = uncheckedGlyph
     }
 
@@ -1288,9 +1360,15 @@ extension FixedLineHeightLayoutManager: NSLayoutManagerDelegate {
     newGlyphs.withUnsafeBufferPointer { gp in
       propsArr.withUnsafeBufferPointer { pp in
         charArr.withUnsafeBufferPointer { cp in
+          guard let glyphBase = gp.baseAddress,
+            let propertyBase = pp.baseAddress,
+            let characterBase = cp.baseAddress
+          else { return }
           setGlyphs(
-            gp.baseAddress!, properties: pp.baseAddress!,
-            characterIndexes: cp.baseAddress!, font: aFont,
+            glyphBase,
+            properties: propertyBase,
+            characterIndexes: characterBase,
+            font: aFont,
             forGlyphRange: glyphRange
           )
         }

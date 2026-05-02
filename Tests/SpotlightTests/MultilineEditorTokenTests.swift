@@ -61,14 +61,14 @@ struct MultilineEditorTokenTests {
     let coordinator = MultilineEditor.Coordinator(parent)
     let textView = makeTextView()
 
-    insert("@cl", into:textView)
+    insert("@cl", into: textView)
     coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: textView))
-    #expect(boundText == "☐ ")
+    #expect(boundText == "☐")
 
     insert("\n", into: textView)
     coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: textView))
 
-    #expect(boundText == "☐ \n")
+    #expect(boundText == "☐\n")
     #expect(heights.last == EditorMetrics.panelHeight(forLines: 2, maxLines: 4))
   }
 
@@ -106,41 +106,41 @@ struct MultilineEditorTokenTests {
   func backspaceAfterChecklistRenderingRestoresLiteral() throws {
     let context = makeEditorContext()
 
-    insert("@cl", into:context.textView)
+    insert("@cl", into: context.textView)
     context.coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: context.textView))
     pressBackspace(in: context.textView)
     context.coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: context.textView))
 
-    #expect(context.boundText() == "[]")
+    #expect(context.boundText() == "[ ]")
 
     insert(" item", into: context.textView)
     context.coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: context.textView))
 
-    #expect(context.boundText() == "[] item")
+    #expect(context.boundText() == "[ ] item")
   }
 
   @Test("cmd+z after @cl rendering restores markdown literal")
   func commandZAfterChecklistRenderingRestoresMarkdownLiteral() throws {
     let context = makeEditorContext()
 
-    insert("@cl", into:context.textView)
+    insert("@cl", into: context.textView)
     context.coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: context.textView))
     pressCommandZ(in: context.textView)
     context.coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: context.textView))
 
-    #expect(context.boundText() == "[]")
+    #expect(context.boundText() == "[ ]")
   }
 
   @Test("direct undo after @cl rendering restores markdown literal")
   func directUndoAfterChecklistRenderingRestoresMarkdownLiteral() throws {
     let context = makeEditorContext()
 
-    insert("@cl", into:context.textView)
+    insert("@cl", into: context.textView)
     context.coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: context.textView))
     _ = context.textView.tryToPerform(Selector(("undo:")), with: nil)
     context.coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: context.textView))
 
-    #expect(context.boundText() == "[]")
+    #expect(context.boundText() == "[ ]")
   }
 
   @Test("backspace after @today rendering reverts even if AppKit leaves caret at original token end")

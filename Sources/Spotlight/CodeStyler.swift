@@ -170,7 +170,9 @@ enum CodeStyler {
       // Suppress the raw Unicode glyph; PlaceholderTextView draws the
       // polished SF Symbol at the same position via its draw(_:) override.
       layoutManager.addTemporaryAttribute(
-        .foregroundColor, value: NSColor.clear, forCharacterRange: marker
+        .foregroundColor,
+        value: NSColor.clear,
+        forCharacterRange: marker
       )
     }
   }
