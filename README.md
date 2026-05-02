@@ -12,7 +12,7 @@ macOS 14+, Xcode 16+ (Swift 6 toolchain).
 
 ```bash
 ./scripts/setup.sh   # one-time: brew, swift-format, swiftlint, periphery, lizard
-./scripts/run.sh     # builds and then launces
+./scripts/run.sh     # builds and then launches the app
 ```
 
 Equivalent Make targets exist for every script: `make build`, `make run`, `make test`, `make ci`.
