@@ -500,6 +500,7 @@ final class PlaceholderTextView: NSTextView {
   var onEscape: (() -> Void)?
   private var lastRenderedToken: RenderedToken?
   private var lastEditContext: EditContext?
+  private var lastInsertionPointDisplayRect: NSRect?
   private var isPasting = false
   private var suppressedOccurrences: [SuppressedTokenOccurrence] = []
 
@@ -846,6 +847,11 @@ final class PlaceholderTextView: NSTextView {
         width: blockWidth,
         height: fontHeight
       )
+      guard flag else {
+        invalidateInsertionPointRect(blockRect)
+        return
+      }
+      lastInsertionPointDisplayRect = blockRect
       color.withAlphaComponent(0.4).setFill()
       blockRect.fill()
     } else {
@@ -857,6 +863,14 @@ final class PlaceholderTextView: NSTextView {
       )
       super.drawInsertionPoint(in: shrunk, color: color, turnedOn: flag)
     }
+  }
+
+  private func invalidateInsertionPointRect(_ rect: NSRect) {
+    super.setNeedsDisplay(rect.insetBy(dx: -2, dy: -2))
+    if let lastInsertionPointDisplayRect {
+      super.setNeedsDisplay(lastInsertionPointDisplayRect.insetBy(dx: -2, dy: -2))
+    }
+    lastInsertionPointDisplayRect = nil
   }
 
   func normalizedInsertionPointRect(_ rect: NSRect) -> NSRect {
@@ -883,29 +897,52 @@ final class PlaceholderTextView: NSTextView {
         originY = textContainerOrigin.y + fragment.maxY
       }
       return NSRect(
-        x: rect.origin.x,
+        x: textContainerOrigin.x + extra.origin.x,
         y: originY,
         width: rect.width,
         height: EditorMetrics.lineHeight
       )
     }
-    let characterIndex = min(max(0, cursor == nsString.length ? cursor - 1 : cursor), nsString.length - 1)
+    let characterIndex = insertionPointReferenceCharacter(cursor: cursor, in: nsString)
     let glyphIndex = min(
       layoutManager.glyphIndexForCharacter(at: characterIndex),
       max(0, layoutManager.numberOfGlyphs - 1)
     )
     let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
     return NSRect(
-      x: rect.origin.x,
+      x: insertionPointX(cursor: cursor, glyphIndex: glyphIndex, in: nsString),
       y: textContainerOrigin.y + fragment.origin.y,
       width: rect.width,
       height: fragment.height
     )
   }
 
+  private func insertionPointReferenceCharacter(cursor: Int, in nsString: NSString) -> Int {
+    if cursor == nsString.length { return max(0, cursor - 1) }
+    if cursor > 0, nsString.character(at: cursor - 1) == 0x0A { return cursor }
+    return min(max(0, cursor), nsString.length - 1)
+  }
+
+  private func insertionPointX(cursor: Int, glyphIndex: Int, in nsString: NSString) -> CGFloat {
+    guard cursor > 0, nsString.character(at: cursor - 1) != 0x0A, let textContainer else {
+      let fragment = layoutManager?.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil) ?? .zero
+      return textContainerOrigin.x + fragment.minX
+    }
+    let priorGlyph = layoutManager?.glyphIndexForCharacter(at: cursor - 1) ?? glyphIndex
+    let priorRect =
+      layoutManager?.boundingRect(
+        forGlyphRange: NSRange(location: priorGlyph, length: 1),
+        in: textContainer
+      ) ?? .zero
+    return textContainerOrigin.x + priorRect.maxX
+  }
+
   override func setNeedsDisplay(_ invalidRect: NSRect) {
     let dx: CGFloat = vimEngine?.mode == .normal ? -10 : 0
     super.setNeedsDisplay(invalidRect.insetBy(dx: dx, dy: -2))
+    if let lastInsertionPointDisplayRect {
+      super.setNeedsDisplay(lastInsertionPointDisplayRect.insetBy(dx: dx, dy: -2))
+    }
   }
 
   @objc func insertTodayBadgeToken(_ sender: Any?) {
