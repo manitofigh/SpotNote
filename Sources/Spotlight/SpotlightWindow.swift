@@ -10,17 +10,19 @@ public final class SpotlightWindowController {
   nonisolated static let panelStyleMask: NSWindow.StyleMask = [
     .borderless, .fullSizeContentView
   ]
-  /// `.statusBar` floats the HUD above any fullscreen Space. `.floating`
-  /// is below the menu-bar / fullscreen layer, so a fullscreen app
-  /// would hide the panel even when ordered front.
-  nonisolated static let panelLevel: NSWindow.Level = .statusBar
+  /// `.screenSaver` keeps the HUD above the window layers used by
+  /// fullscreen apps. Lower levels such as `.floating` and `.statusBar`
+  /// can still be occluded by fullscreen windows on recent macOS
+  /// releases even when the panel joins that Space.
+  nonisolated static let panelLevel: NSWindow.Level = .screenSaver
   /// `.fullScreenAuxiliary` is the load-bearing flag -- it lets a panel
   /// appear in a fullscreen Space alongside the fullscreen app.
   /// `.canJoinAllSpaces` keeps the panel reachable from every Space,
-  /// and `.stationary` stops it being dragged along during Space
-  /// transitions (which would otherwise yank focus during the swipe).
+  /// `.stationary` stops it being dragged along during Space
+  /// transitions (which would otherwise yank focus during the swipe),
+  /// and `.ignoresCycle` keeps this transient HUD out of Cmd-` cycling.
   nonisolated static let panelCollectionBehavior: NSWindow.CollectionBehavior = [
-    .canJoinAllSpaces, .fullScreenAuxiliary, .stationary
+    .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
   ]
   nonisolated static let defaultUnfocusedAlpha: CGFloat = 0.55
 
@@ -212,7 +214,7 @@ public final class SpotlightWindowController {
       focusOrShow()
     } else {
       NSApp.activate(ignoringOtherApps: true)
-      panel?.makeKeyAndOrderFront(nil)
+      if let panel { bringPanelToFront(panel) }
     }
     if let mostRecent = session.chats.first {
       session.jump(to: mostRecent)
@@ -258,8 +260,13 @@ public final class SpotlightWindowController {
     }
     panel.alphaValue = 1.0
     NSApp.activate(ignoringOtherApps: true)
-    panel.makeKeyAndOrderFront(nil)
+    bringPanelToFront(panel)
     focusTrigger.pulse()
+  }
+
+  private func bringPanelToFront(_ panel: NSPanel) {
+    panel.makeKeyAndOrderFront(nil)
+    panel.orderFrontRegardless()
   }
 
   private func repositionForShow(_ panel: NSPanel) {
@@ -292,15 +299,7 @@ public final class SpotlightWindowController {
       backing: .buffered,
       defer: false
     )
-    panel.isOpaque = false
-    panel.backgroundColor = .clear
-    panel.hasShadow = true
-    panel.level = Self.panelLevel
-    panel.isFloatingPanel = true
-    panel.hidesOnDeactivate = false
-    panel.becomesKeyOnlyIfNeeded = false
-    panel.isMovableByWindowBackground = true
-    panel.collectionBehavior = Self.panelCollectionBehavior
+    Self.configurePanel(panel)
     panel.contentView = NSHostingView(
       rootView: SpotlightRootView(
         focusTrigger: focusTrigger,
@@ -325,6 +324,18 @@ public final class SpotlightWindowController {
     }
     observeKeyState(panel)
     return panel
+  }
+
+  static func configurePanel(_ panel: NSPanel) {
+    panel.isOpaque = false
+    panel.backgroundColor = .clear
+    panel.hasShadow = true
+    panel.isFloatingPanel = true
+    panel.level = panelLevel
+    panel.hidesOnDeactivate = false
+    panel.becomesKeyOnlyIfNeeded = false
+    panel.isMovableByWindowBackground = true
+    panel.collectionBehavior = panelCollectionBehavior
   }
 
   private static let driftCorrectionThreshold: CGFloat = 4

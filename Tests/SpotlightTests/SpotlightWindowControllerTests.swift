@@ -13,7 +13,7 @@ struct SpotlightWindowControllerTests {
   /// a visible, keyed window. `.nonactivatingPanel` was tried as part
   /// of an over-fullscreen fix and reproduced exactly that symptom
   /// (HUD never opens). The over-fullscreen path is handled instead
-  /// by `panelLevel == .statusBar` + `.fullScreenAuxiliary` in the
+  /// by `panelLevel == .screenSaver` + `.fullScreenAuxiliary` in the
   /// collection behavior -- see the dedicated tests below.
   @Test("panel style mask must NOT contain .nonactivatingPanel for an LSUIElement app")
   func panelStyleMaskExcludesNonactivating() {
@@ -41,12 +41,33 @@ struct SpotlightWindowControllerTests {
     #expect(behavior.contains(.canJoinAllSpaces))
   }
 
-  /// **Regression guard** -- anything below `.statusBar` is hidden by a
-  /// fullscreen app's window layer. `.floating` was the previous level
-  /// and was the proximate cause of the over-fullscreen bug.
-  @Test("panel level is .statusBar or higher -- required for over-fullscreen HUD")
+  /// **Regression guard** -- recent macOS releases can keep
+  /// fullscreen windows above `.statusBar` auxiliary panels. The HUD is
+  /// transient, so it uses the overlay-grade screen saver level.
+  @Test("panel level is .screenSaver -- required for over-fullscreen HUD")
   func panelLevelIsAboveFullscreen() {
-    #expect(SpotlightWindowController.panelLevel.rawValue >= NSWindow.Level.statusBar.rawValue)
+    #expect(SpotlightWindowController.panelLevel == .screenSaver)
+  }
+
+  @Test("configured panel applies fullscreen overlay behavior")
+  @MainActor
+  func configuredPanelAppliesFullscreenOverlayBehavior() {
+    let panel = SpotlightPanel(
+      contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+      styleMask: SpotlightWindowController.panelStyleMask,
+      backing: .buffered,
+      defer: false
+    )
+
+    SpotlightWindowController.configurePanel(panel)
+
+    #expect(panel.level == .screenSaver)
+    #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
+    #expect(panel.collectionBehavior.contains(.fullScreenAuxiliary))
+    #expect(panel.collectionBehavior.contains(.stationary))
+    #expect(panel.collectionBehavior.contains(.ignoresCycle))
+    #expect(panel.hidesOnDeactivate == false)
+    #expect(panel.isFloatingPanel)
   }
 
   @Test("default unfocused alpha is between 0.5 and 1.0 -- visible but clearly faded")
