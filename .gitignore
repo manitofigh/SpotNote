@@ -14,6 +14,8 @@ Tools/reports/
 .env
 .wrangler/
 
+scripts/publish-github-release.sh
+
 .DS_Store
 *.tmp
 *.bak
