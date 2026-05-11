@@ -97,6 +97,48 @@ struct FuzzyControllerTests {
     #expect(ranked.first?.chat.id == chats[0].id, "exact word beats subsequence")
   }
 
+  @Test("rank requires every query term to match")
+  func rankRequiresEveryTerm() {
+    let chats = [
+      makeChat("alpha planning note"),
+      makeChat("alpha gamma release note")
+    ]
+    let ranked = FuzzyController.rank(query: "alpha gamma", in: chats, limit: 10)
+    #expect(ranked.map(\.chat.id) == [chats[1].id])
+  }
+
+  @Test("rank previews the line that produced a body hit")
+  func rankUsesMatchedBodyLineAsPreview() throws {
+    let chat = makeChat("Title\n\nimplementation details live here")
+    let ranked = FuzzyController.rank(query: "details", in: [chat], limit: 10)
+    let result = try #require(ranked.first)
+    #expect(result.snippet == "implementation details live here")
+    #expect(result.matchRanges == [TextRange(location: 22, length: 7)])
+  }
+
+  @Test("rank highlights literal query terms before fuzzy fragments")
+  func rankPrefersLiteralHighlight() throws {
+    let chat = makeChat("☐ this is some item\n☐ another item")
+    let ranked = FuzzyController.rank(query: "this", in: [chat], limit: 10)
+    let result = try #require(ranked.first)
+    #expect(result.matchRanges == [TextRange(location: 2, length: 4)])
+  }
+
+  @Test("preview excerpt clamps large notes around the highlighted match")
+  func previewExcerptClampsLargeNotes() throws {
+    let prefix = String(repeating: "a", count: FuzzyPreviewExcerpt.characterLimit + 500)
+    let text = prefix + "needle" + String(repeating: "b", count: FuzzyPreviewExcerpt.characterLimit)
+    let range = TextRange(location: prefix.count, length: 6)
+
+    let excerpt = FuzzyPreviewExcerpt.make(text: text, ranges: [range])
+    let highlighted = try #require(excerpt.ranges.first)
+    let start = excerpt.text.index(excerpt.text.startIndex, offsetBy: highlighted.location)
+    let end = excerpt.text.index(start, offsetBy: highlighted.length)
+
+    #expect(excerpt.text.count <= FuzzyPreviewExcerpt.characterLimit + 8)
+    #expect(String(excerpt.text[start..<end]) == "needle")
+  }
+
   @Test("previewLine returns the first non-empty line trimmed and clamped")
   func previewLineTrims() {
     let preview = FuzzyController.previewLine("\n\n  hello world  \nsecond line")
@@ -108,6 +150,18 @@ struct FuzzyControllerTests {
     let chats = [makeChat("alpha"), makeChat("beta"), makeChat("gamma")]
     let ranked = FuzzyController.rank(query: "", in: chats, limit: 50)
     #expect(ranked.map { $0.position } == [1, 2, 3])
+  }
+
+  @Test("moveSelection changes the selected fuzzy result without touching chats")
+  func moveSelectionChangesSelectedResult() {
+    let controller = FuzzyController()
+    let chats = [makeChat("alpha"), makeChat("beta"), makeChat("gamma")]
+    controller.open(corpus: chats)
+    #expect(controller.selectedChat()?.id == chats[0].id)
+    controller.moveSelection(by: 1)
+    #expect(controller.selectedChat()?.id == chats[1].id)
+    controller.moveSelection(by: -1)
+    #expect(controller.selectedChat()?.id == chats[0].id)
   }
 
   @Test("⌃W word delete trims the trailing word and any trailing whitespace")

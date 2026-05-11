@@ -30,6 +30,7 @@ public final class SpotlightWindowController {
   nonisolated static let defaultUnfocusedAlpha: CGFloat = 0.55
 
   private var panel: SpotlightPanel?
+  private var fuzzyPreviewPanel: FuzzyPreviewPanel?
   private let focusTrigger = FocusTrigger()
   let preferences: ThemePreferences
   let session: ChatSession
@@ -73,6 +74,10 @@ public final class SpotlightWindowController {
       case .bottomPinned(let y): return .bottomPinned(y: y)
       }
     }
+  }
+  private enum FuzzyPreviewSide {
+    case left
+    case right
   }
   private var navAnchor: NavAnchorState = .none
   private struct MeasuredHeightCache {
@@ -157,6 +162,7 @@ public final class SpotlightWindowController {
     observeActiveApp()
     installModifierMonitor()
     observeNavigationPreview()
+    observeFuzzyPreview()
     installVimCommandRunner()
     Task { [session] in await session.bootstrap() }
   }
@@ -200,6 +206,75 @@ public final class SpotlightWindowController {
       .store(in: &cancellables)
   }
 
+  private func observeFuzzyPreview() {
+    fuzzyController.$isVisible
+      .combineLatest(fuzzyController.$results, fuzzyController.$selectedIndex)
+      .sink { [weak self] _, _, _ in
+        MainActor.assumeIsolated { self?.syncFuzzyPreviewPanel() }
+      }
+      .store(in: &cancellables)
+  }
+
+  private func syncFuzzyPreviewPanel() {
+    guard
+      fuzzyController.isVisible,
+      fuzzyController.selectedResult() != nil,
+      let panel,
+      panel.isVisible,
+      let frame = fuzzyPreviewFrame(for: panel)
+    else {
+      fuzzyPreviewPanel?.orderOut(nil)
+      return
+    }
+    let preview = fuzzyPreviewPanel ?? makeFuzzyPreviewPanel(parent: panel)
+    fuzzyPreviewPanel = preview
+    if preview.parent !== panel {
+      panel.addChildWindow(preview, ordered: .above)
+    }
+    if !Self.rect(preview.frame, isApproximatelyEqualTo: frame) {
+      preview.setFrame(frame, display: true)
+    }
+    if !preview.isVisible {
+      preview.orderFrontRegardless()
+    }
+  }
+
+  private func fuzzyPreviewFrame(for panel: NSPanel) -> NSRect? {
+    let screenFrame = (panel.screen ?? NSScreen.main)?.visibleFrame
+    guard let screenFrame else { return nil }
+    let panelFrame = panel.frame
+    let gap = FuzzyPreviewCard.gap
+    let rightSpace = screenFrame.maxX - panelFrame.maxX - gap
+    let leftSpace = panelFrame.minX - screenFrame.minX - gap
+    let preferred = FuzzyPreviewCard.preferredWidth
+    let minimum = FuzzyPreviewCard.minimumWidth
+    let side: FuzzyPreviewSide
+    let width: CGFloat
+    if rightSpace >= preferred {
+      side = .right
+      width = preferred
+    } else if leftSpace >= preferred {
+      side = .left
+      width = preferred
+    } else if rightSpace >= leftSpace, rightSpace >= minimum {
+      side = .right
+      width = rightSpace
+    } else if leftSpace >= minimum {
+      side = .left
+      width = leftSpace
+    } else {
+      return nil
+    }
+    let height = min(panelFrame.height, screenFrame.height)
+    let y = min(panelFrame.maxY, screenFrame.maxY) - height
+    let x: CGFloat
+    switch side {
+    case .right: x = panelFrame.maxX + gap
+    case .left: x = panelFrame.minX - gap - width
+    }
+    return NSRect(x: x.rounded(), y: y.rounded(), width: width.rounded(), height: height.rounded())
+  }
+
   public func handleHotkey() {
     if let panel, panel.isVisible, panel.isKeyWindow, NSApp.isActive {
       close()
@@ -231,6 +306,7 @@ public final class SpotlightWindowController {
   }
 
   public func close() {
+    fuzzyPreviewPanel?.orderOut(nil)
     panel?.orderOut(nil)
     // If a bona-fide SpotNote window (Settings) is visible, leave the
     // app active so the user can keep working there. Filter to
@@ -270,6 +346,7 @@ public final class SpotlightWindowController {
   private func bringPanelToFront(_ panel: NSPanel) {
     panel.makeKeyAndOrderFront(nil)
     panel.orderFrontRegardless()
+    syncFuzzyPreviewPanel()
   }
 
   private func repositionForShow(_ panel: NSPanel) {
@@ -339,6 +416,31 @@ public final class SpotlightWindowController {
     panel.becomesKeyOnlyIfNeeded = false
     panel.isMovableByWindowBackground = true
     panel.collectionBehavior = panelCollectionBehavior
+  }
+
+  private func makeFuzzyPreviewPanel(parent: NSPanel) -> FuzzyPreviewPanel {
+    let preview = FuzzyPreviewPanel(
+      contentRect: NSRect(
+        x: 0,
+        y: 0,
+        width: FuzzyPreviewCard.preferredWidth,
+        height: max(parent.frame.height, FuzzyPalette.reservedHeight)
+      ),
+      styleMask: Self.panelStyleMask,
+      backing: .buffered,
+      defer: false
+    )
+    Self.configurePanel(preview)
+    preview.hasShadow = false
+    preview.ignoresMouseEvents = false
+    preview.contentView = NSHostingView(
+      rootView: FuzzyPreviewCard(
+        controller: fuzzyController,
+        preferences: preferences
+      )
+    )
+    parent.addChildWindow(preview, ordered: .above)
+    return preview
   }
 
   private static let driftCorrectionThreshold: CGFloat = 4
@@ -417,6 +519,7 @@ public final class SpotlightWindowController {
     guard let panel else { return }
     programmaticFrameToIgnore = frame
     panel.setFrame(frame, display: display, animate: animate)
+    syncFuzzyPreviewPanel()
   }
 
   private func shouldIgnoreProgrammaticMove(_ frame: NSRect) -> Bool {
@@ -479,6 +582,7 @@ extension SpotlightWindowController {
           let newTop = panel.frame.origin.y + panel.frame.size.height
           self.pinnedTopY = newTop
           self.editorTopY = newTop - self.chromeAboveEditor
+          self.syncFuzzyPreviewPanel()
         }
       }
     )
@@ -511,6 +615,15 @@ extension SpotlightWindowController {
       case .olderChat, .newerChat:
         let delta = action == .olderChat ? 1 : -1
         Task { @MainActor [weak self] in self?.commandController.moveSelection(by: delta) }
+        return true
+      default: break
+      }
+    }
+    if MainActor.assumeIsolated({ fuzzyController.isVisible }) {
+      switch action {
+      case .olderChat, .newerChat:
+        let delta = action == .olderChat ? 1 : -1
+        Task { @MainActor [weak self] in self?.fuzzyController.moveSelection(by: delta) }
         return true
       default: break
       }

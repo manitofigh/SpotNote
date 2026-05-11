@@ -42,9 +42,21 @@ struct FuzzyMatchTests {
     #expect(atStart.score > midWord.score)
   }
 
-  @Test("matches array records every byte position the query landed on")
+  @Test("matches array records every character position the query landed on")
   func recordsMatchPositions() {
     let result = FuzzyMatch.score(query: "abc", in: "axbxcx")
     #expect(result?.matches == [0, 2, 4])
+  }
+
+  @Test("best alignment prefers compact later runs over early scattered hits")
+  func bestAlignmentPrefersCompactRun() {
+    let result = FuzzyMatch.score(query: "abc", in: "a-----b---abc")
+    #expect(result?.matches == [10, 11, 12])
+  }
+
+  @Test("distant scattered characters are rejected as noise")
+  func distantScatterMisses() {
+    let text = "a " + String(repeating: "x", count: 80) + " b " + String(repeating: "y", count: 80) + " c"
+    #expect(FuzzyMatch.score(query: "abc", in: text) == nil)
   }
 }
