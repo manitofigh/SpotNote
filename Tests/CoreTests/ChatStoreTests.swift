@@ -109,6 +109,43 @@ struct ChatStoreTests {
     #expect(onDisk.text == "drafted then dropped", "restore writes through to disk")
   }
 
+  @Test("chat archive round trips chats")
+  func chatArchiveRoundTrips() throws {
+    let date = Date(timeIntervalSinceReferenceDate: 42)
+    let chat = Chat(
+      id: UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID(),
+      createdAt: date,
+      updatedAt: date,
+      text: "portable note",
+      isPinned: true
+    )
+    let archive = ChatArchive(exportedAt: date, chats: [chat])
+
+    let decoded = try ChatArchive.decode(archive.encodedData())
+
+    #expect(decoded == archive)
+  }
+
+  @Test("importing duplicate ids creates new chats without overwriting")
+  func importDuplicateIDsDoNotOverwrite() async throws {
+    let dir = try makeTempDirectory()
+    let store = try ChatStore(directory: dir, debounce: .milliseconds(20))
+    let date = Date(timeIntervalSinceReferenceDate: 100)
+    let id = UUID(uuidString: "00000000-0000-0000-0000-000000000002") ?? UUID()
+    let existing = Chat(id: id, createdAt: date, updatedAt: date, text: "existing")
+    try await store.restore(existing)
+
+    let incoming = Chat(id: id, createdAt: date, updatedAt: date, text: "imported", isPinned: true)
+    let inserted = try await store.importChats([incoming])
+
+    #expect(inserted.count == 1)
+    #expect(inserted[0].id != id)
+    #expect(inserted[0].text == "imported")
+    #expect(inserted[0].isPinned)
+    #expect(await store.get(id)?.text == "existing")
+    #expect(await store.list().count == 2)
+  }
+
   @Test("a large paste is written as one atomic blob, not many")
   func largePasteIsOneWrite() async throws {
     let dir = try makeTempDirectory()

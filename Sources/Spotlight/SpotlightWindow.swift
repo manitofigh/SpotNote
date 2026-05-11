@@ -305,6 +305,14 @@ public final class SpotlightWindowController {
     }
   }
 
+  public func reloadLibrary() {
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      await self.session.reload()
+      self.fuzzyController.updateCorpus(self.session.chats)
+    }
+  }
+
   public func close() {
     fuzzyPreviewPanel?.orderOut(nil)
     panel?.orderOut(nil)
@@ -682,11 +690,25 @@ extension SpotlightWindowController {
       _ = panel?.firstResponder?.tryToPerform(#selector(PlaceholderTextView.toggleChecklistShortcut(_:)), with: nil)
     case .pinNote:
       Task { await session.togglePin() }
+    case .shareCurrentChat:
+      shareCurrentChat()
     case .copyContent:
       copyController.copy(session.currentText)
     case .openSettings: onOpenSettings()
     case .toggleTutorial: preferences.showHints.toggle()
     case .toggleHotkey, .appendToLastNote: break
+    }
+  }
+
+  private func shareCurrentChat() {
+    guard let chat = session.currentChatSnapshot(), let view = panel?.contentView else {
+      NSSound.beep()
+      return
+    }
+    do {
+      try ChatTransferService.share(chats: [chat], from: view)
+    } catch {
+      NSSound.beep()
     }
   }
 

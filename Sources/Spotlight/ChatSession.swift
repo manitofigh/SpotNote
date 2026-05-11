@@ -73,6 +73,28 @@ final class ChatSession: ObservableObject {
     }
   }
 
+  func reload() async {
+    await store.flush()
+    chats = await store.list()
+    if let id = currentID, let current = chats.first(where: { $0.id == id }) {
+      currentText = current.text
+    } else if let mostRecent = chats.first {
+      currentID = mostRecent.id
+      currentText = mostRecent.text
+    } else {
+      _ = await createBlankChat()
+    }
+  }
+
+  func currentChatSnapshot() -> Chat? {
+    guard let id = currentID else { return nil }
+    var snapshot =
+      chats.first(where: { $0.id == id })
+      ?? Chat(id: id, createdAt: Date(), updatedAt: Date(), text: currentText)
+    snapshot.text = currentText
+    return snapshot
+  }
+
   /// Binds to ⌘N -- creates a fresh blank chat unconditionally (even
   /// when already on an empty one; a user may deliberately want a
   /// second blank slate).

@@ -1,4 +1,5 @@
 import AppKit
+import Core
 import Spotlight
 import SwiftUI
 
@@ -8,10 +9,19 @@ final class SettingsWindowController {
   private var window: NSWindow?
   private let preferences: ThemePreferences
   private let shortcuts: ShortcutStore
+  private let store: ChatStore
+  private let onLibraryChanged: @MainActor () -> Void
 
-  init(preferences: ThemePreferences, shortcuts: ShortcutStore) {
+  init(
+    preferences: ThemePreferences,
+    shortcuts: ShortcutStore,
+    store: ChatStore,
+    onLibraryChanged: @escaping @MainActor () -> Void
+  ) {
     self.preferences = preferences
     self.shortcuts = shortcuts
+    self.store = store
+    self.onLibraryChanged = onLibraryChanged
   }
 
   /// Shows the Preferences window, creating it on first use.
@@ -46,7 +56,12 @@ final class SettingsWindowController {
       alpha: 1
     )
     window.contentView = NSHostingView(
-      rootView: SettingsView(preferences: preferences, shortcuts: shortcuts)
+      rootView: SettingsView(
+        preferences: preferences,
+        shortcuts: shortcuts,
+        store: store,
+        onLibraryChanged: onLibraryChanged
+      )
     )
     return window
   }

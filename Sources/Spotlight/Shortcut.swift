@@ -81,6 +81,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
   case undoDelete
   case findInNote
   case fuzzyFindAll
+  case shareCurrentChat
   case copyContent
   case openSettings
   case pinNote
@@ -103,6 +104,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .undoDelete: return "Undo delete"
     case .findInNote: return "Find in note"
     case .fuzzyFindAll: return "Fuzzy find any note"
+    case .shareCurrentChat: return "Share current note"
     case .copyContent: return "Copy note"
     case .openSettings: return "Open settings"
     case .pinNote: return "Pin / unpin note"
@@ -126,6 +128,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .undoDelete: return "Restore the most recently deleted note."
     case .findInNote: return "Search for text inside the current note."
     case .fuzzyFindAll: return "Open the fuzzy palette to jump to any saved note."
+    case .shareCurrentChat: return "Export the current note as a .sn file and open the macOS share sheet."
     case .copyContent: return "Copy the whole note. With a selection, copies just the selection."
     case .openSettings: return "Open this settings window."
     case .pinNote: return "Pin the current note so it stays at the top of the list."
@@ -148,6 +151,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .undoDelete: return Shortcut(key: "z", modifiers: [.command])
     case .findInNote: return Shortcut(key: "f", modifiers: [.command])
     case .fuzzyFindAll: return Shortcut(key: "p", modifiers: [.command])
+    case .shareCurrentChat: return Shortcut(key: "e", modifiers: [.command, .shift])
     case .copyContent: return Shortcut(key: "c", modifiers: [.command])
     case .openSettings: return Shortcut(key: ",", modifiers: [.command])
     case .pinNote: return Shortcut(key: "s", modifiers: [.command])

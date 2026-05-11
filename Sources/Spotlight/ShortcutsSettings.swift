@@ -23,7 +23,10 @@ struct ShortcutsPane: View {
       )
       ShortcutGroup(
         title: "Notes",
-        actions: [.newChat, .olderChat, .newerChat, .deleteChat, .undoDelete, .pinNote, .copyContent],
+        actions: [
+          .newChat, .olderChat, .newerChat, .deleteChat, .undoDelete, .pinNote,
+          .copyContent, .shareCurrentChat
+        ],
         store: shortcuts
       )
       ShortcutGroup(

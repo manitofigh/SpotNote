@@ -6,14 +6,23 @@ import SwiftUI
 public struct SettingsView: View {
   @ObservedObject var preferences: ThemePreferences
   @ObservedObject var shortcuts: ShortcutStore
+  let store: ChatStore
+  let onLibraryChanged: @MainActor () -> Void
   @State private var selection: SettingsSection = .general
   @State private var sidebarCollapsed = false
 
   private let bg = ThemeCatalog.obsidian.background
 
-  public init(preferences: ThemePreferences, shortcuts: ShortcutStore) {
+  public init(
+    preferences: ThemePreferences,
+    shortcuts: ShortcutStore,
+    store: ChatStore,
+    onLibraryChanged: @escaping @MainActor () -> Void
+  ) {
     self.preferences = preferences
     self.shortcuts = shortcuts
+    self.store = store
+    self.onLibraryChanged = onLibraryChanged
   }
 
   public var body: some View {
@@ -107,6 +116,7 @@ public struct SettingsView: View {
         case .vim: VimPane(preferences: preferences)
         case .theme: ThemePane(preferences: preferences)
         case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
+        case .importExport: ImportExportPane(store: store, onLibraryChanged: onLibraryChanged)
         case .updates: UpdatesPane()
         }
       }
@@ -126,6 +136,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
   case vim
   case theme
   case shortcuts
+  case importExport
   case updates
 
   var id: String { rawValue }
@@ -137,6 +148,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case .vim: return "Vim"
     case .theme: return "Theme"
     case .shortcuts: return "Shortcuts"
+    case .importExport: return "Import / Export"
     case .updates: return "Updates"
     }
   }
@@ -148,6 +160,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case .vim: return "command"
     case .theme: return "paintpalette"
     case .shortcuts: return "keyboard"
+    case .importExport: return "tray.and.arrow.down"
     case .updates: return "arrow.down.circle"
     }
   }
@@ -159,6 +172,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case .vim: return Color(red: 0.20, green: 0.55, blue: 0.40)
     case .theme: return Color(red: 0.85, green: 0.50, blue: 0.90)
     case .shortcuts: return Color(red: 0.95, green: 0.65, blue: 0.30)
+    case .importExport: return Color(red: 0.45, green: 0.70, blue: 0.88)
     case .updates: return Color(red: 0.30, green: 0.75, blue: 0.50)
     }
   }

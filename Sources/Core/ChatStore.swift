@@ -103,6 +103,21 @@ public actor ChatStore {
     try persistNow(chat)
   }
 
+  /// Imports chats from a portable archive. Existing chats are never
+  /// overwritten; an incoming duplicate id is assigned a fresh id while
+  /// preserving text, timestamps, and pin state.
+  @discardableResult
+  public func importChats(_ imported: [Chat]) throws -> [Chat] {
+    var inserted: [Chat] = []
+    for chat in imported {
+      let resolved = uniqueImportedChat(from: chat)
+      chats[resolved.id] = resolved
+      try persistNow(resolved)
+      inserted.append(resolved)
+    }
+    return inserted
+  }
+
   public func togglePin(id: UUID) throws {
     guard var chat = chats[id] else { return }
     chat.isPinned.toggle()
@@ -169,6 +184,17 @@ public actor ChatStore {
     encoder.outputFormatting = [.sortedKeys]
     let data = try encoder.encode(chat)
     try data.write(to: fileURL(for: chat.id), options: .atomic)
+  }
+
+  private func uniqueImportedChat(from chat: Chat) -> Chat {
+    guard chats[chat.id] != nil else { return chat }
+    return Chat(
+      id: UUID(),
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt,
+      text: chat.text,
+      isPinned: chat.isPinned
+    )
   }
 
   private func fileURL(for id: UUID) -> URL {

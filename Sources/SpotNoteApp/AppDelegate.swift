@@ -11,7 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private lazy var shortcutStore = ShortcutStore()
   private lazy var settings = SettingsWindowController(
     preferences: preferences,
-    shortcuts: shortcutStore
+    shortcuts: shortcutStore,
+    store: chatStore,
+    onLibraryChanged: { [weak self] in self?.handleLibraryChangedFromSettings() }
   )
   private lazy var chatStore: ChatStore = {
     if let store = try? ChatStore(directory: ChatStore.defaultDirectory()) {
@@ -30,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     preferences: preferences,
     store: chatStore,
     shortcuts: shortcutStore,
-    onOpenSettings: { [weak self] in self?.settings.show() }
+    onOpenSettings: { [weak self] in self?.showSettings() }
   )
   private var menuBar: MenuBarController?
   private var hotkey: GlobalHotkey?
@@ -40,13 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     DockIconSwitcher.applyVisibility(preferences.showDockIcon)
-    MainMenu.install(onOpenSettings: { [weak self] in self?.settings.show() })
+    MainMenu.install(onOpenSettings: { [weak self] in self?.showSettings() })
 
     enableLaunchAtLoginIfFirstRun()
 
     menuBar = MenuBarController(
       preferences: preferences,
-      onOpenSettings: { [weak self] in self?.settings.show() }
+      onOpenSettings: { [weak self] in self?.showSettings() }
     )
 
     NotificationCenter.default.addObserver(
@@ -135,6 +137,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Defer one runloop tick so the spotlight controller and menu bar
     // finish their own first-pass setup before the tutorial steals focus.
     DispatchQueue.main.async { [weak controller] in controller?.show() }
+  }
+
+  private func showSettings() {
+    settings.show()
+  }
+
+  private func handleLibraryChangedFromSettings() {
+    spotlight.reloadLibrary()
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
