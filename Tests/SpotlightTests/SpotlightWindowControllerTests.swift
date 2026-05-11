@@ -13,8 +13,9 @@ struct SpotlightWindowControllerTests {
   /// a visible, keyed window. `.nonactivatingPanel` was tried as part
   /// of an over-fullscreen fix and reproduced exactly that symptom
   /// (HUD never opens). The over-fullscreen path is handled instead
-  /// by `panelLevel == .screenSaver` + `.fullScreenAuxiliary` in the
-  /// collection behavior -- see the dedicated tests below.
+  /// by `panelLevel == .screenSaver`, `.canJoinAllApplications`, and
+  /// `.fullScreenAuxiliary` in the collection behavior -- see the
+  /// dedicated tests below.
   @Test("panel style mask must NOT contain .nonactivatingPanel for an LSUIElement app")
   func panelStyleMaskExcludesNonactivating() {
     #expect(!SpotlightWindowController.panelStyleMask.contains(.nonactivatingPanel))
@@ -41,6 +42,18 @@ struct SpotlightWindowControllerTests {
     #expect(behavior.contains(.canJoinAllSpaces))
   }
 
+  /// **Regression guard** -- macOS 13+ fullscreen Spaces are scoped to
+  /// application sets. `.canJoinAllSpaces` is not enough for an
+  /// LSUIElement HUD summoned over another app; the panel must also be
+  /// allowed to join other apps' fullscreen sets.
+  @Test("panel can join all applications -- required for cross-app fullscreen HUD")
+  func panelCanJoinAllApplications() {
+    let behavior = SpotlightWindowController.panelCollectionBehavior
+    #expect(behavior.contains(.canJoinAllApplications))
+    #expect(!behavior.contains(.primary))
+    #expect(!behavior.contains(.auxiliary))
+  }
+
   /// **Regression guard** -- recent macOS releases can keep
   /// fullscreen windows above `.statusBar` auxiliary panels. The HUD is
   /// transient, so it uses the overlay-grade screen saver level.
@@ -63,6 +76,7 @@ struct SpotlightWindowControllerTests {
 
     #expect(panel.level == .screenSaver)
     #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
+    #expect(panel.collectionBehavior.contains(.canJoinAllApplications))
     #expect(panel.collectionBehavior.contains(.fullScreenAuxiliary))
     #expect(panel.collectionBehavior.contains(.stationary))
     #expect(panel.collectionBehavior.contains(.ignoresCycle))

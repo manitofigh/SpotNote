@@ -15,14 +15,17 @@ public final class SpotlightWindowController {
   /// can still be occluded by fullscreen windows on recent macOS
   /// releases even when the panel joins that Space.
   nonisolated static let panelLevel: NSWindow.Level = .screenSaver
-  /// `.fullScreenAuxiliary` is the load-bearing flag -- it lets a panel
-  /// appear in a fullscreen Space alongside the fullscreen app.
+  /// `.canJoinAllApplications` is the cross-app fullscreen guard:
+  /// without it, an LSUIElement HUD can activate while the fullscreen
+  /// app visibly blurs/refocuses, but the panel is not admitted into
+  /// that app's fullscreen Space.
   /// `.canJoinAllSpaces` keeps the panel reachable from every Space,
+  /// `.fullScreenAuxiliary` lets it sit alongside fullscreen windows,
   /// `.stationary` stops it being dragged along during Space
   /// transitions (which would otherwise yank focus during the swipe),
   /// and `.ignoresCycle` keeps this transient HUD out of Cmd-` cycling.
   nonisolated static let panelCollectionBehavior: NSWindow.CollectionBehavior = [
-    .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
+    .canJoinAllApplications, .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
   ]
   nonisolated static let defaultUnfocusedAlpha: CGFloat = 0.55
 
