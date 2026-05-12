@@ -21,11 +21,13 @@ public final class SpotlightWindowController {
   /// that app's fullscreen Space.
   /// `.canJoinAllSpaces` keeps the panel reachable from every Space,
   /// `.fullScreenAuxiliary` lets it sit alongside fullscreen windows,
-  /// `.stationary` stops it being dragged along during Space
-  /// transitions (which would otherwise yank focus during the swipe),
-  /// and `.ignoresCycle` keeps this transient HUD out of Cmd-` cycling.
+  /// `.transient` keeps it in the floating Spaces group. `.stationary`
+  /// looks tempting for all-space overlays, but AppKit treats it like
+  /// desktop chrome; fullscreen Spaces can then leave a reused panel
+  /// behind the fullscreen layer.
+  /// `.ignoresCycle` keeps this transient HUD out of Cmd-` cycling.
   nonisolated static let panelCollectionBehavior: NSWindow.CollectionBehavior = [
-    .canJoinAllApplications, .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
+    .canJoinAllApplications, .canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle
   ]
   nonisolated static let defaultUnfocusedAlpha: CGFloat = 0.55
 
@@ -356,6 +358,8 @@ public final class SpotlightWindowController {
   }
 
   private func bringPanelToFront(_ panel: NSPanel) {
+    Self.configurePanel(panel)
+    panel.orderFrontRegardless()
     panel.makeKeyAndOrderFront(nil)
     panel.orderFrontRegardless()
     syncFuzzyPreviewPanel()
@@ -687,11 +691,20 @@ extension SpotlightWindowController {
       if fuzzyController.isVisible { fuzzyController.close() }
       commandController.toggle(shortcuts: shortcuts, preferences: preferences)
     case .insertTodayBadge:
-      _ = panel?.firstResponder?.tryToPerform(#selector(PlaceholderTextView.insertTodayBadgeToken(_:)), with: nil)
+      _ = panel?.firstResponder?.tryToPerform(
+        #selector(PlaceholderTextView.insertTodayBadgeToken(_:)),
+        with: nil
+      )
     case .insertChecklist:
-      _ = panel?.firstResponder?.tryToPerform(#selector(PlaceholderTextView.insertChecklistToken(_:)), with: nil)
+      _ = panel?.firstResponder?.tryToPerform(
+        #selector(PlaceholderTextView.insertChecklistToken(_:)),
+        with: nil
+      )
     case .toggleChecklist:
-      _ = panel?.firstResponder?.tryToPerform(#selector(PlaceholderTextView.toggleChecklistShortcut(_:)), with: nil)
+      _ = panel?.firstResponder?.tryToPerform(
+        #selector(PlaceholderTextView.toggleChecklistShortcut(_:)),
+        with: nil
+      )
     case .pinNote:
       Task { await session.togglePin() }
     case .shareCurrentChat:

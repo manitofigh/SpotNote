@@ -35,7 +35,9 @@ struct SpotlightWindowControllerTests {
   /// **Regression guard** -- `.fullScreenAuxiliary` is what allows the
   /// HUD to render in a Space owned by a fullscreen app. Without it,
   /// the panel is hidden behind the fullscreen layer and never shown.
-  @Test("panel collection behavior includes .fullScreenAuxiliary -- required for over-fullscreen HUD")
+  @Test(
+    "panel collection behavior includes .fullScreenAuxiliary -- required for over-fullscreen HUD"
+  )
   func panelCollectionBehaviorAllowsFullscreen() {
     let behavior = SpotlightWindowController.panelCollectionBehavior
     #expect(behavior.contains(.fullScreenAuxiliary))
@@ -52,6 +54,17 @@ struct SpotlightWindowControllerTests {
     #expect(behavior.contains(.canJoinAllApplications))
     #expect(!behavior.contains(.primary))
     #expect(!behavior.contains(.auxiliary))
+  }
+
+  /// **Regression guard** -- the HUD is a summonable floating overlay,
+  /// not desktop chrome. `.stationary` can leave a reused panel behind
+  /// a fullscreen window set after AppKit rebuilds Spaces membership.
+  @Test("panel uses transient Spaces behavior -- required for reused over-fullscreen HUD")
+  func panelUsesTransientSpacesBehavior() {
+    let behavior = SpotlightWindowController.panelCollectionBehavior
+    #expect(behavior.contains(.transient))
+    #expect(!behavior.contains(.managed))
+    #expect(!behavior.contains(.stationary))
   }
 
   /// **Regression guard** -- recent macOS releases can keep
@@ -78,7 +91,8 @@ struct SpotlightWindowControllerTests {
     #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
     #expect(panel.collectionBehavior.contains(.canJoinAllApplications))
     #expect(panel.collectionBehavior.contains(.fullScreenAuxiliary))
-    #expect(panel.collectionBehavior.contains(.stationary))
+    #expect(panel.collectionBehavior.contains(.transient))
+    #expect(!panel.collectionBehavior.contains(.stationary))
     #expect(panel.collectionBehavior.contains(.ignoresCycle))
     #expect(panel.hidesOnDeactivate == false)
     #expect(panel.isFloatingPanel)
