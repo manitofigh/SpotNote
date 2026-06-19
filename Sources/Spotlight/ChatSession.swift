@@ -250,6 +250,18 @@ final class ChatSession: ObservableObject {
     }
   }
 
+  /// Accepts the note currently shown by navigation cycling and hides
+  /// the preview list immediately. Cycling already switches `currentID`
+  /// and `currentText`; committing only clears the transient browse UI.
+  func commitNavigationSelection() -> Bool {
+    guard navigationPreview != nil else { return false }
+    keepNavigationOpen = false
+    navigationPreview = nil
+    previewDismissTask?.cancel()
+    previewDismissTask = nil
+    return true
+  }
+
   private func scheduleDismiss(after delay: Duration) {
     previewDismissTask?.cancel()
     previewDismissTask = Task { @MainActor [weak self] in

@@ -128,7 +128,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .undoDelete: return "Restore the most recently deleted note."
     case .findInNote: return "Search for text inside the current note."
     case .fuzzyFindAll: return "Open the fuzzy palette to jump to any saved note."
-    case .shareCurrentChat: return "Export the current note as a .sn file and open the macOS share sheet."
+    case .shareCurrentChat: return "Export the current note as a .md file and open the macOS share sheet."
     case .copyContent: return "Copy the whole note. With a selection, copies just the selection."
     case .openSettings: return "Open this settings window."
     case .pinNote: return "Pin the current note so it stays at the top of the list."

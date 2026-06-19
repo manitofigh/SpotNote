@@ -151,4 +151,33 @@ struct ThemePreferencesTests {
     let rehydrated = ThemePreferences(defaults: defaults)
     #expect(rehydrated.showHints == false)
   }
+
+  @Test("dimBackgroundWhileFocused defaults off and persists")
+  func dimBackgroundWhileFocusedPersists() {
+    let defaults = makeDefaults()
+    let prefs = ThemePreferences(defaults: defaults)
+    #expect(prefs.dimBackgroundWhileFocused == false)
+
+    prefs.dimBackgroundWhileFocused = true
+    #expect(defaults.bool(forKey: "hud.dimBackgroundWhileFocused") == true)
+    let rehydrated = ThemePreferences(defaults: defaults)
+    #expect(rehydrated.dimBackgroundWhileFocused == true)
+  }
+
+  @Test("focusedBackgroundOpacity defaults, persists, and clamps")
+  func focusedBackgroundOpacityPersistsAndClamps() {
+    let defaults = makeDefaults()
+    let prefs = ThemePreferences(defaults: defaults)
+    #expect(prefs.focusedBackgroundOpacity == 0.70)
+
+    prefs.focusedBackgroundOpacity = 0.35
+    #expect(defaults.double(forKey: "hud.focusedBackgroundOpacity") == 0.35)
+    let rehydrated = ThemePreferences(defaults: defaults)
+    #expect(rehydrated.focusedBackgroundOpacity == 0.35)
+
+    prefs.focusedBackgroundOpacity = 0.01
+    #expect(prefs.focusedBackgroundOpacity == 0.1)
+    prefs.focusedBackgroundOpacity = 2.0
+    #expect(prefs.focusedBackgroundOpacity == 1.0)
+  }
 }

@@ -69,6 +69,30 @@ struct MultilineEditorVimLogicalLineMotionTests {
     #expect(rect.origin.y == EditorMetrics.lineHeight)
   }
 
+  @Test("j and G reveal caret positions below the visible viewport")
+  func motionsRevealCaret() {
+    let lines = (1...30).map { "line \($0)" }
+    let textView = makeVimMotionTextView(text: lines.joined(separator: "\n"))
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: EditorMetrics.lineHeight * 3))
+    scrollView.hasVerticalScroller = true
+    scrollView.documentView = textView
+    textView.frame = NSRect(
+      x: 0,
+      y: 0,
+      width: 320,
+      height: EditorMetrics.lineHeight * CGFloat(lines.count)
+    )
+    textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+    textView.executeMotion(.down(10))
+    let afterDown = scrollView.contentView.bounds.origin.y
+    textView.executeMotion(.documentEnd)
+
+    #expect(afterDown > 0)
+    #expect(scrollView.contentView.bounds.origin.y > afterDown)
+    #expect(textView.selectedRange.location == (textView.string as NSString).length)
+  }
+
   private func makeVimMotionTextView(text: String) -> PlaceholderTextView {
     let textView = PlaceholderTextView(frame: NSRect(x: 0, y: 0, width: EditorMetrics.panelWidth, height: 240))
     textView.font = .systemFont(ofSize: EditorMetrics.fontSize)

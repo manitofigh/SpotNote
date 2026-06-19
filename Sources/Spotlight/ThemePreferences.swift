@@ -18,6 +18,8 @@ public final class ThemePreferences: ObservableObject {
     static let vimMode = "editor.vimMode"
     static let dimOnFocusLoss = "hud.dimOnFocusLoss"
     static let unfocusedOpacity = "hud.unfocusedOpacity"
+    static let dimBackgroundWhileFocused = "hud.dimBackgroundWhileFocused"
+    static let focusedBackgroundOpacity = "hud.focusedBackgroundOpacity"
     static let dockIconStyle = "dock.iconStyle"
     static let showDockIcon = "dock.showIcon"
   }
@@ -81,6 +83,21 @@ public final class ThemePreferences: ObservableObject {
     }
   }
 
+  @Published public var dimBackgroundWhileFocused: Bool {
+    didSet { defaults.set(dimBackgroundWhileFocused, forKey: Key.dimBackgroundWhileFocused) }
+  }
+
+  @Published public var focusedBackgroundOpacity: Double {
+    didSet {
+      let clamped = min(max(0.1, focusedBackgroundOpacity), 1.0)
+      if clamped != focusedBackgroundOpacity {
+        focusedBackgroundOpacity = clamped
+        return
+      }
+      defaults.set(focusedBackgroundOpacity, forKey: Key.focusedBackgroundOpacity)
+    }
+  }
+
   /// Maximum layout rows the Spotlight panel grows to before scrolling.
   /// Clamped to `[minVisibleLines, maxVisibleLinesCap]` in the setter so
   /// a corrupt defaults entry can't blow out the HUD.
@@ -111,6 +128,13 @@ public final class ThemePreferences: ObservableObject {
     self.dimOnFocusLoss = Self.boolOrDefault(defaults, Key.dimOnFocusLoss, default: false)
     let storedOpacity = defaults.object(forKey: Key.unfocusedOpacity) as? Double
     self.unfocusedOpacity = min(max(0.1, storedOpacity ?? 0.55), 1.0)
+    self.dimBackgroundWhileFocused = Self.boolOrDefault(
+      defaults,
+      Key.dimBackgroundWhileFocused,
+      default: false
+    )
+    let storedFocusedOpacity = defaults.object(forKey: Key.focusedBackgroundOpacity) as? Double
+    self.focusedBackgroundOpacity = min(max(0.1, storedFocusedOpacity ?? 0.70), 1.0)
     let stored = defaults.object(forKey: Key.maxVisibleLines) as? Int
     self.maxVisibleLines = Self.clampVisibleLines(stored ?? Self.defaultVisibleLines)
   }

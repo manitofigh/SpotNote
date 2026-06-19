@@ -181,3 +181,46 @@ struct FuzzyControllerTests {
     #expect(!controller.isVisible)
   }
 }
+
+@MainActor
+@Suite("CommandController")
+struct CommandControllerTests {
+  private func makeDefaults() -> UserDefaults {
+    let suite = "spotnote.command-controller.\(UUID().uuidString)"
+    return UserDefaults(suiteName: suite) ?? .standard
+  }
+
+  @Test("shortcut rows expose executable actions while settings rows do not")
+  func executableRows() throws {
+    let defaults = makeDefaults()
+    let controller = CommandController()
+    controller.open(
+      shortcuts: ShortcutStore(defaults: defaults),
+      preferences: ThemePreferences(defaults: defaults)
+    )
+
+    let newChatIndex = try #require(controller.results.firstIndex { $0.id == "shortcut.newChat" })
+    controller.selectedIndex = newChatIndex
+    #expect(controller.selectedExecutableAction() == .newChat)
+
+    let settingIndex = try #require(controller.results.firstIndex { $0.id == "setting.lineNumbers" })
+    controller.selectedIndex = settingIndex
+    #expect(controller.selectedExecutableAction() == nil)
+  }
+
+  @Test("opening and explicit refocus requests advance the focus token")
+  func focusRequestsAdvance() {
+    let defaults = makeDefaults()
+    let controller = CommandController()
+    controller.open(
+      shortcuts: ShortcutStore(defaults: defaults),
+      preferences: ThemePreferences(defaults: defaults)
+    )
+    let openedRequest = controller.focusRequest
+
+    controller.requestFocus()
+
+    #expect(openedRequest > 0)
+    #expect(controller.focusRequest == openedRequest + 1)
+  }
+}

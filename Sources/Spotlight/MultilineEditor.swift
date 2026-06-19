@@ -46,6 +46,9 @@ struct MultilineEditor: NSViewRepresentable {
   /// mode (insert-mode Esc still falls through to the engine to switch
   /// modes first, matching real vim).
   var onEscape: (() -> Void)?
+  /// Invoked when Return should accept the currently previewed navigation
+  /// note instead of inserting a newline.
+  var onCommitNavigationSelection: (() -> Bool)?
   /// Called from the AppKit delegate synchronously, so the panel resizes in
   /// the same runloop tick as the text change. A SwiftUI `@State` round-trip
   /// would defer the resize by one runloop, causing a visible flash.
@@ -65,6 +68,7 @@ struct MultilineEditor: NSViewRepresentable {
     textView.vimModeEnabled = vimModeEnabled
     textView.attachVimController(vimController)
     textView.onEscape = onEscape
+    textView.onCommitNavigationSelection = onCommitNavigationSelection
     return scroll
   }
 
@@ -125,6 +129,7 @@ struct MultilineEditor: NSViewRepresentable {
     }
     textView.attachVimController(vimController)
     textView.onEscape = onEscape
+    textView.onCommitNavigationSelection = onCommitNavigationSelection
     applyStyle(textView: textView)
     textView.placeholderString = placeholder
     configureRuler(scroll: scroll, textView: textView, visible: showLineNumbers)
@@ -498,6 +503,7 @@ final class PlaceholderTextView: NSTextView {
   var vimEngine: VimEngine?
   weak var vimController: VimController?
   var onEscape: (() -> Void)?
+  var onCommitNavigationSelection: (() -> Bool)?
   private var lastRenderedToken: RenderedToken?
   private var lastEditContext: EditContext?
   private var lastInsertionPointDisplayRect: NSRect?
@@ -533,14 +539,14 @@ final class PlaceholderTextView: NSTextView {
     stabilizeTypingAttributes()
     let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
     let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
-    if mods == .command, chars == "z", revertLastRenderedTokenIfPossible() {
-      return
-    }
-    if mods.isEmpty, event.keyCode == 51, revertLastRenderedTokenIfPossible() {
+    if revertRenderedTokenIfNeeded(event: event, mods: mods, chars: chars) {
       return
     }
     if let controller = vimController, controller.prompt != nil {
       if handlePromptKey(event: event, controller: controller, mods: mods) { return }
+    }
+    if commitNavigationSelectionIfNeeded(event: event, mods: mods) {
+      return
     }
     if mods == .control, chars == "w" {
       deleteWordBackward(self)
@@ -565,6 +571,27 @@ final class PlaceholderTextView: NSTextView {
       return
     }
     super.keyDown(with: event)
+  }
+
+  private func revertRenderedTokenIfNeeded(
+    event: NSEvent,
+    mods: NSEvent.ModifierFlags,
+    chars: String
+  ) -> Bool {
+    let isUndo = mods == .command && chars == "z"
+    let isBackspace = mods.isEmpty && event.keyCode == 51
+    return (isUndo || isBackspace) && revertLastRenderedTokenIfPossible()
+  }
+
+  private func commitNavigationSelectionIfNeeded(
+    event: NSEvent,
+    mods: NSEvent.ModifierFlags
+  ) -> Bool {
+    mods.isEmpty && isReturnKey(event) && onCommitNavigationSelection?() == true
+  }
+
+  private func isReturnKey(_ event: NSEvent) -> Bool {
+    event.keyCode == 36 || event.keyCode == 76
   }
 
   override func deleteBackward(_ sender: Any?) {
@@ -626,6 +653,7 @@ final class PlaceholderTextView: NSTextView {
   }
 
   func executeMotion(_ motion: Motion) {
+    defer { revealCaret() }
     if let delta = logicalLineDelta(for: motion) {
       moveByLogicalLines(delta)
       return
@@ -645,6 +673,11 @@ final class PlaceholderTextView: NSTextView {
     default:
       break
     }
+  }
+
+  private func revealCaret() {
+    let location = min(selectedRange.location, (string as NSString).length)
+    scrollRangeToVisible(NSRange(location: location, length: 0))
   }
 
   private func repeatedMotion(_ motion: Motion) -> ((Any?) -> Void, Int)? {

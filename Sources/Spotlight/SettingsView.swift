@@ -329,6 +329,32 @@ private struct GeneralPane: View {
             displayValue: "\(Int(preferences.unfocusedOpacity * 100))%"
           )
         }
+
+        SettingsDivider()
+
+        SettingsToggleRow(
+          title: "Dim background while writing",
+          subtitle: "Reduce only the HUD background opacity while the editor is focused.",
+          isOn: Binding(
+            get: { preferences.dimBackgroundWhileFocused },
+            set: { preferences.dimBackgroundWhileFocused = $0 }
+          )
+        )
+
+        if preferences.dimBackgroundWhileFocused {
+          SettingsDivider()
+          SettingsSliderRow(
+            title: "Focused background opacity",
+            subtitle: "How transparent the HUD background is while writing.",
+            value: Binding(
+              get: { preferences.focusedBackgroundOpacity },
+              set: { preferences.focusedBackgroundOpacity = $0 }
+            ),
+            range: 0.1...1.0,
+            step: 0.05,
+            displayValue: "\(Int(preferences.focusedBackgroundOpacity * 100))%"
+          )
+        }
       }
     }
   }

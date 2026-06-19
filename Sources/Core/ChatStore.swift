@@ -103,7 +103,7 @@ public actor ChatStore {
     try persistNow(chat)
   }
 
-  /// Imports chats from a portable archive. Existing chats are never
+  /// Imports chats from external files. Existing chats are never
   /// overwritten; an incoming duplicate id is assigned a fresh id while
   /// preserving text, timestamps, and pin state.
   @discardableResult

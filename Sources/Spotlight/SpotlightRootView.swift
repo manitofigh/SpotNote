@@ -33,8 +33,13 @@ struct SpotlightRootView: View {
   /// Invoked when Esc should dismiss the HUD (vim off, or vim on and
   /// already in normal mode).
   let onEscape: () -> Void
+  let onCommand: (ShortcutAction) -> Void
 
-  private var theme: Theme { preferences.activeTheme }
+  private var theme: Theme {
+    let activeTheme = preferences.activeTheme
+    guard preferences.dimBackgroundWhileFocused else { return activeTheme }
+    return activeTheme.withBackgroundOpacity(preferences.focusedBackgroundOpacity)
+  }
 
   private var editorFont: NSFont {
     NSFont(name: InterFont.regular, size: EditorMetrics.fontSize)
@@ -99,7 +104,7 @@ struct SpotlightRootView: View {
         .frame(height: FuzzyPalette.reservedHeight)
         .transition(.opacity)
       } else if command.isVisible {
-        CommandPalette(controller: command, theme: theme)
+        CommandPalette(controller: command, theme: theme, onExecute: onCommand)
           .padding(.horizontal, EditorMetrics.outerPadding)
           .padding(.bottom, EditorMetrics.outerPadding)
           .frame(height: CommandPalette.reservedHeight)
@@ -182,6 +187,7 @@ struct SpotlightRootView: View {
       vimModeEnabled: preferences.vimMode,
       vimController: vimController,
       onEscape: onEscape,
+      onCommitNavigationSelection: session.commitNavigationSelection,
       onHeightChange: onHeightChange
     )
     .padding(.leading, EditorMetrics.leadingInset)

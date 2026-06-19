@@ -11,6 +11,18 @@ public struct Theme: Equatable, Identifiable, Sendable {
   let border: Color
   let text: Color
   let placeholder: Color
+
+  func withBackgroundOpacity(_ opacity: Double) -> Theme {
+    Theme(
+      id: id,
+      name: name,
+      mode: mode,
+      background: background.opacity(opacity),
+      border: border,
+      text: text,
+      placeholder: placeholder
+    )
+  }
 }
 
 /// Ten curated themes -- five dark, five light.

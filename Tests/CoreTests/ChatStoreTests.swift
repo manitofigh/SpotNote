@@ -109,23 +109,6 @@ struct ChatStoreTests {
     #expect(onDisk.text == "drafted then dropped", "restore writes through to disk")
   }
 
-  @Test("chat archive round trips chats")
-  func chatArchiveRoundTrips() throws {
-    let date = Date(timeIntervalSinceReferenceDate: 42)
-    let chat = Chat(
-      id: UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID(),
-      createdAt: date,
-      updatedAt: date,
-      text: "portable note",
-      isPinned: true
-    )
-    let archive = ChatArchive(exportedAt: date, chats: [chat])
-
-    let decoded = try ChatArchive.decode(archive.encodedData())
-
-    #expect(decoded == archive)
-  }
-
   @Test("importing duplicate ids creates new chats without overwriting")
   func importDuplicateIDsDoNotOverwrite() async throws {
     let dir = try makeTempDirectory()

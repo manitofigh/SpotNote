@@ -201,6 +201,21 @@ struct MultilineEditorTokenTests {
     #expect(context.boundText().matchesDateLine)
   }
 
+  @Test("return commits navigation overlay instead of inserting newline")
+  func returnCommitsNavigationOverlay() {
+    let context = makeEditorContext(initialText: "selected note")
+    var committed = false
+    context.textView.onCommitNavigationSelection = {
+      committed = true
+      return true
+    }
+
+    pressReturn(in: context.textView)
+
+    #expect(committed)
+    #expect(context.textView.string == "selected note")
+  }
+
   private struct EditorContext {
     let coordinator: MultilineEditor.Coordinator
     let textView: PlaceholderTextView
@@ -313,6 +328,25 @@ private func pressBackspace(in textView: PlaceholderTextView) {
       charactersIgnoringModifiers: "\u{7F}",
       isARepeat: false,
       keyCode: 51
+    )
+  else { return }
+  textView.keyDown(with: event)
+}
+
+@MainActor
+private func pressReturn(in textView: PlaceholderTextView) {
+  guard
+    let event = NSEvent.keyEvent(
+      with: .keyDown,
+      location: .zero,
+      modifierFlags: [],
+      timestamp: 0,
+      windowNumber: 0,
+      context: nil,
+      characters: "\r",
+      charactersIgnoringModifiers: "\r",
+      isARepeat: false,
+      keyCode: 36
     )
   else { return }
   textView.keyDown(with: event)

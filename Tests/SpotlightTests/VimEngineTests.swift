@@ -198,6 +198,16 @@ struct VimEngineTests {
     #expect(engine.handle(key: "D", hasModifiers: false) == .deleteToEndOfLine)
   }
 
+  @Test("C deletes to end of line and enters insert")
+  func shiftCDeleteToEndInsert() {
+    let engine = VimEngine()
+    #expect(
+      engine.handle(key: "C", hasModifiers: false)
+        == .composite([.deleteToEndOfLine, .switchToInsert])
+    )
+    #expect(engine.mode == .insert)
+  }
+
   @Test("dd deletes current line")
   func ddDeleteLine() {
     let engine = VimEngine()

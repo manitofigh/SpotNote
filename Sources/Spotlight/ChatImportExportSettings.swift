@@ -85,8 +85,11 @@ final class ChatImportExportViewModel: ObservableObject {
 
   private func export(chats: [Chat]) {
     do {
-      if let url = try ChatTransferService.exportWithSavePanel(chats: chats) {
-        status = Status(kind: .success, message: "Exported \(noteCount(chats.count)) to \(url.lastPathComponent).")
+      if let result = try ChatTransferService.exportWithSavePanel(chats: chats) {
+        status = Status(
+          kind: .success,
+          message: "Exported \(noteCount(result.urls.count)) to \(result.destinationName)."
+        )
       }
     } catch {
       status = Status(kind: .failure, message: error.localizedDescription)
@@ -128,8 +131,8 @@ struct ImportExportPane: View {
       SettingsCard {
         ImportExportActionRow(
           icon: "square.and.arrow.down",
-          title: "Import SpotNote chats",
-          subtitle: "Choose one or more .sn files and add their notes to this library.",
+          title: "Import Markdown notes",
+          subtitle: "Choose one or more .md files and add them to this library.",
           buttonTitle: "Import",
           isDisabled: model.isBusy,
           action: model.importArchives
@@ -244,7 +247,7 @@ private struct ExportActionRow: View {
         .foregroundStyle(.secondary)
         .frame(width: 22)
       VStack(alignment: .leading, spacing: 2) {
-        Text("Export SpotNote chats")
+        Text("Export Markdown notes")
           .font(.system(.body, weight: .regular))
         Text(selectedLabel)
           .font(.subheadline)

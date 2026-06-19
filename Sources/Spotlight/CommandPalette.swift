@@ -3,6 +3,7 @@ import SwiftUI
 struct CommandPalette: View {
   @ObservedObject var controller: CommandController
   let theme: Theme
+  let onExecute: (ShortcutAction) -> Void
 
   static let reservedHeight: CGFloat = 260
 
@@ -24,7 +25,10 @@ struct CommandPalette: View {
     }
     .background(Self.shape.fill(theme.background))
     .overlay(Self.shape.strokeBorder(theme.border, lineWidth: 1))
-    .onAppear { focused = true }
+    .task(id: controller.focusRequest) {
+      await Task.yield()
+      focused = true
+    }
   }
 
   private var searchField: some View {
@@ -44,7 +48,7 @@ struct CommandPalette: View {
       .font(.system(size: 13))
       .foregroundStyle(theme.text)
       .focused($focused)
-      .onSubmit {}
+      .onSubmit { commit() }
       .onKeyPress(.escape) {
         controller.close()
         return .handled
@@ -154,4 +158,8 @@ struct CommandPalette: View {
     controller.results.isEmpty ? "" : "\(controller.results.count)"
   }
 
+  private func commit() {
+    guard let action = controller.selectedExecutableAction() else { return }
+    onExecute(action)
+  }
 }

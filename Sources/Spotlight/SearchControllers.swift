@@ -91,6 +91,7 @@ struct CommandItem: Identifiable, Equatable {
   let category: String
   let icon: String
   let chord: String?
+  let executableAction: ShortcutAction?
 }
 
 /// State for the command palette (⌘K). Searches over settings and
@@ -101,6 +102,7 @@ final class CommandController: ObservableObject {
   @Published var query: String = ""
   @Published private(set) var results: [CommandItem] = []
   @Published var selectedIndex: Int = 0
+  @Published private(set) var focusRequest: Int = 0
 
   private var corpus: [CommandItem] = []
 
@@ -110,6 +112,7 @@ final class CommandController: ObservableObject {
     selectedIndex = 0
     query = ""
     results = corpus
+    requestFocus()
   }
 
   func close() {
@@ -147,6 +150,15 @@ final class CommandController: ObservableObject {
     selectedIndex = (selectedIndex + delta + results.count) % results.count
   }
 
+  func selectedExecutableAction() -> ShortcutAction? {
+    guard results.indices.contains(selectedIndex) else { return nil }
+    return results[selectedIndex].executableAction
+  }
+
+  func requestFocus() {
+    focusRequest &+= 1
+  }
+
   // periphery:ignore:parameters preferences - kept on the API even when
   // no current pane reads from it; future entries (e.g. theme submenu)
   // will need it.
@@ -164,7 +176,8 @@ final class CommandController: ObservableObject {
           subtitle: shortcutAction.subtitle,
           category: "Shortcuts",
           icon: "command",
-          chord: chord
+          chord: chord,
+          executableAction: executableAction(for: shortcutAction)
         )
       )
     }
@@ -175,7 +188,17 @@ final class CommandController: ObservableObject {
       ("Hints bar", "Show the keyboard shortcut hint strip above the editor.", "hintsBar"),
       ("Vim mode", "Use vim-style keybindings for modal editing.", "vimMode"),
       ("Dim instead of hide", "Keep HUD visible at reduced opacity on focus loss.", "dimOnFocusLoss"),
-      ("Unfocused opacity", "How transparent the HUD becomes when unfocused.", "unfocusedOpacity")
+      ("Unfocused opacity", "How transparent the HUD becomes when unfocused.", "unfocusedOpacity"),
+      (
+        "Dim background while writing",
+        "Reduce only the HUD background opacity while the editor is focused.",
+        "dimBackgroundWhileFocused"
+      ),
+      (
+        "Focused background opacity",
+        "How transparent the HUD background is while writing.",
+        "focusedBackgroundOpacity"
+      )
     ]
     for (title, subtitle, key) in settings {
       items.append(
@@ -185,7 +208,8 @@ final class CommandController: ObservableObject {
           subtitle: subtitle,
           category: "Editor",
           icon: "gearshape",
-          chord: nil
+          chord: nil,
+          executableAction: nil
         )
       )
     }
@@ -197,10 +221,20 @@ final class CommandController: ObservableObject {
           subtitle: "\(theme.mode == .dark ? "Dark" : "Light") theme",
           category: "Themes",
           icon: "paintpalette",
-          chord: nil
+          chord: nil,
+          executableAction: nil
         )
       )
     }
     return items
+  }
+
+  private static func executableAction(for action: ShortcutAction) -> ShortcutAction? {
+    switch action {
+    case .toggleHotkey, .appendToLastNote, .commandPalette:
+      return nil
+    default:
+      return action
+    }
   }
 }

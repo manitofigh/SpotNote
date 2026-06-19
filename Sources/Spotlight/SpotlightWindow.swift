@@ -412,6 +412,9 @@ public final class SpotlightWindowController {
         },
         onEscape: { [weak self] in
           self?.close()
+        },
+        onCommand: { [weak self] action in
+          self?.executeCommandPaletteAction(action)
         }
       )
     )
@@ -617,6 +620,22 @@ extension SpotlightWindowController {
         return true
       }
       if event.keyCode == 36 || event.keyCode == 76 {
+        MainActor.assumeIsolated { executeSelectedCommand() }
+        return true
+      }
+    }
+    if MainActor.assumeIsolated({ fuzzyController.isVisible }) {
+      if event.keyCode == 53 {
+        MainActor.assumeIsolated { fuzzyController.close() }
+        return true
+      }
+      if event.keyCode == 36 || event.keyCode == 76 {
+        MainActor.assumeIsolated { openSelectedFuzzyResult() }
+        return true
+      }
+    }
+    if event.keyCode == 36 || event.keyCode == 76 {
+      if MainActor.assumeIsolated({ session.commitNavigationSelection() }) {
         return true
       }
     }
@@ -628,6 +647,9 @@ extension SpotlightWindowController {
     if action == .toggleHotkey || action == .appendToLastNote { return false }
     if MainActor.assumeIsolated({ commandController.isVisible }) {
       switch action {
+      case .commandPalette:
+        MainActor.assumeIsolated { commandController.requestFocus() }
+        return true
       case .olderChat, .newerChat:
         let delta = action == .olderChat ? 1 : -1
         Task { @MainActor [weak self] in self?.commandController.moveSelection(by: delta) }
@@ -656,6 +678,22 @@ extension SpotlightWindowController {
     if action == .newChat || action == .deleteChat, event.isARepeat { return true }
     Task { @MainActor [weak self] in self?.dispatch(action) }
     return true
+  }
+
+  private func openSelectedFuzzyResult() {
+    guard let chat = fuzzyController.selectedChat() else { return }
+    session.jump(to: chat)
+    fuzzyController.close()
+  }
+
+  private func executeSelectedCommand() {
+    guard let action = commandController.selectedExecutableAction() else { return }
+    executeCommandPaletteAction(action)
+  }
+
+  private func executeCommandPaletteAction(_ action: ShortcutAction) {
+    commandController.close()
+    dispatch(action)
   }
 
   /// Pass-through gates for context-sensitive shortcuts (undo with no
@@ -691,17 +729,17 @@ extension SpotlightWindowController {
       if fuzzyController.isVisible { fuzzyController.close() }
       commandController.toggle(shortcuts: shortcuts, preferences: preferences)
     case .insertTodayBadge:
-      _ = panel?.firstResponder?.tryToPerform(
+      _ = editorTextView()?.tryToPerform(
         #selector(PlaceholderTextView.insertTodayBadgeToken(_:)),
         with: nil
       )
     case .insertChecklist:
-      _ = panel?.firstResponder?.tryToPerform(
+      _ = editorTextView()?.tryToPerform(
         #selector(PlaceholderTextView.insertChecklistToken(_:)),
         with: nil
       )
     case .toggleChecklist:
-      _ = panel?.firstResponder?.tryToPerform(
+      _ = editorTextView()?.tryToPerform(
         #selector(PlaceholderTextView.toggleChecklistShortcut(_:)),
         with: nil
       )
@@ -715,6 +753,19 @@ extension SpotlightWindowController {
     case .toggleTutorial: preferences.showHints.toggle()
     case .toggleHotkey, .appendToLastNote: break
     }
+  }
+
+  private func editorTextView() -> PlaceholderTextView? {
+    findEditorTextView(in: panel?.contentView)
+  }
+
+  private func findEditorTextView(in view: NSView?) -> PlaceholderTextView? {
+    guard let view else { return nil }
+    if let textView = view as? PlaceholderTextView { return textView }
+    for subview in view.subviews {
+      if let textView = findEditorTextView(in: subview) { return textView }
+    }
+    return nil
   }
 
   private func shareCurrentChat() {

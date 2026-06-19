@@ -150,6 +150,9 @@ final class VimEngine {
     switch key {
     case "x": return .deleteChar(count: count)
     case "D": return .deleteToEndOfLine
+    case "C":
+      mode = .insert
+      return .composite([.deleteToEndOfLine, .switchToInsert])
     case "u": return .undo(count: count)
     case "V":
       mode = .visualLine
