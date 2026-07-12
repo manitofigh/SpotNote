@@ -34,7 +34,26 @@ public struct Shortcut: Codable, Hashable, Sendable {
     case "tab": return "Tab"
     case "return": return "Return"
     case "escape": return "Esc"
+    case "leftarrow": return "←"
+    case "rightarrow": return "→"
+    case "downarrow": return "↓"
+    case "uparrow": return "↑"
     default: return key.uppercased()
+    }
+  }
+
+  public static func key(from event: NSEvent) -> String {
+    if let key = key(forKeyCode: event.keyCode) { return key }
+    return normalize(event.charactersIgnoringModifiers ?? "")
+  }
+
+  static func key(forKeyCode keyCode: UInt16) -> String? {
+    switch keyCode {
+    case 123: return "leftarrow"
+    case 124: return "rightarrow"
+    case 125: return "downarrow"
+    case 126: return "uparrow"
+    default: return nil
     }
   }
 }
@@ -87,6 +106,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
   case pinNote
   case commandPalette
   case toggleTutorial
+  case moveHUDLeft
+  case moveHUDRight
+  case moveHUDDown
+  case moveHUDUp
 
   public var id: String { rawValue }
 
@@ -110,6 +133,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .pinNote: return "Pin / unpin note"
     case .commandPalette: return "Command palette"
     case .toggleTutorial: return "Toggle hints bar"
+    case .moveHUDLeft: return "Move HUD left"
+    case .moveHUDRight: return "Move HUD right"
+    case .moveHUDDown: return "Move HUD down"
+    case .moveHUDUp: return "Move HUD up"
     }
   }
 
@@ -134,6 +161,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .pinNote: return "Pin the current note so it stays at the top of the list."
     case .commandPalette: return "Search settings and keyboard shortcuts."
     case .toggleTutorial: return "Show or hide the hint strip above the editor."
+    case .moveHUDLeft: return "Shift the HUD left on the current screen."
+    case .moveHUDRight: return "Shift the HUD right on the current screen."
+    case .moveHUDDown: return "Shift the HUD down on the current screen."
+    case .moveHUDUp: return "Shift the HUD up on the current screen."
     }
   }
 
@@ -157,6 +188,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .pinNote: return Shortcut(key: "s", modifiers: [.command])
     case .commandPalette: return Shortcut(key: "k", modifiers: [.command])
     case .toggleTutorial: return Shortcut(key: "/", modifiers: [.command])
+    case .moveHUDLeft: return Shortcut(key: "leftarrow", modifiers: [.command, .option])
+    case .moveHUDRight: return Shortcut(key: "rightarrow", modifiers: [.command, .option])
+    case .moveHUDDown: return Shortcut(key: "downarrow", modifiers: [.command, .option])
+    case .moveHUDUp: return Shortcut(key: "uparrow", modifiers: [.command, .option])
     }
   }
 }

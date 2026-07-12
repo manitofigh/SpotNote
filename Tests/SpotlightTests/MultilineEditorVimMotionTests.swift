@@ -93,8 +93,73 @@ struct MultilineEditorVimLogicalLineMotionTests {
     #expect(textView.selectedRange.location == (textView.string as NSString).length)
   }
 
-  private func makeVimMotionTextView(text: String) -> PlaceholderTextView {
-    let textView = PlaceholderTextView(frame: NSRect(x: 0, y: 0, width: EditorMetrics.panelWidth, height: 240))
+  @Test("caret at a soft-wrap boundary uses the new visual fragment")
+  func caretAtSoftWrapBoundary() throws {
+    let textView = makeVimMotionTextView(
+      text: "abcdefghijklmnop qrstuvwxyz",
+      width: 58
+    )
+    guard let layoutManager = textView.layoutManager,
+      let textContainer = textView.textContainer
+    else { return }
+    layoutManager.ensureLayout(for: textContainer)
+
+    let nsText = textView.string as NSString
+    var wrapCursor: Int?
+    for cursor in 1..<nsText.length {
+      let previous = layoutManager.glyphIndexForCharacter(at: cursor - 1)
+      let next = layoutManager.glyphIndexForCharacter(at: cursor)
+      let previousFragment = layoutManager.lineFragmentRect(
+        forGlyphAt: previous,
+        effectiveRange: nil
+      )
+      let nextFragment = layoutManager.lineFragmentRect(forGlyphAt: next, effectiveRange: nil)
+      if nextFragment.origin.y > previousFragment.origin.y + 0.5 {
+        wrapCursor = cursor
+        break
+      }
+    }
+    let cursor = try #require(wrapCursor)
+    let nextGlyph = layoutManager.glyphIndexForCharacter(at: cursor)
+    let nextFragment = layoutManager.lineFragmentRect(forGlyphAt: nextGlyph, effectiveRange: nil)
+    textView.setSelectedRange(NSRange(location: cursor, length: 0))
+
+    let rect = textView.normalizedInsertionPointRect(
+      NSRect(x: 0, y: 0, width: 1, height: EditorMetrics.lineHeight)
+    )
+    #expect(abs(rect.origin.x - (textView.textContainerOrigin.x + nextFragment.minX)) < 0.01)
+    #expect(abs(rect.origin.y - (textView.textContainerOrigin.y + nextFragment.minY)) < 0.01)
+  }
+
+  @Test("caret after trailing spaces uses the newline insertion advance")
+  func caretAfterTrailingSpaces() {
+    let textView = makeVimMotionTextView(text: "abc   \nnext", width: 320)
+    let cursor = ("abc   " as NSString).length
+    textView.setSelectedRange(NSRange(location: cursor, length: 0))
+    guard let layoutManager = textView.layoutManager,
+      let textContainer = textView.textContainer
+    else { return }
+    layoutManager.ensureLayout(for: textContainer)
+
+    let newlineGlyph = layoutManager.glyphIndexForCharacter(at: cursor)
+    let fragment = layoutManager.lineFragmentRect(forGlyphAt: newlineGlyph, effectiveRange: nil)
+    let expectedX =
+      textView.textContainerOrigin.x
+      + fragment.minX
+      + layoutManager.location(forGlyphAt: newlineGlyph).x
+    let rect = textView.normalizedInsertionPointRect(
+      NSRect(x: 0, y: 0, width: 1, height: EditorMetrics.lineHeight)
+    )
+
+    #expect(abs(rect.origin.x - expectedX) < 0.01)
+    #expect(abs(rect.origin.y - (textView.textContainerOrigin.y + fragment.minY)) < 0.01)
+  }
+
+  private func makeVimMotionTextView(
+    text: String,
+    width: CGFloat = EditorMetrics.panelWidth
+  ) -> PlaceholderTextView {
+    let textView = PlaceholderTextView(frame: NSRect(x: 0, y: 0, width: width, height: 240))
     textView.font = .systemFont(ofSize: EditorMetrics.fontSize)
     textView.string = text
     textView.textContainer?.lineFragmentPadding = 0

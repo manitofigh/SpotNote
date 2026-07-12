@@ -86,12 +86,16 @@ struct VimEngineTests {
   // MARK: - Simple motions
 
   @Test(
-    "h/j/k/l produce correct motions",
+    "h/j/k/l and arrow aliases produce correct motions",
     arguments: [
       ("h", Motion.left(1)),
       ("j", Motion.down(1)),
       ("k", Motion.up(1)),
-      ("l", Motion.right(1))
+      ("l", Motion.right(1)),
+      ("leftarrow", Motion.left(1)),
+      ("downarrow", Motion.down(1)),
+      ("uparrow", Motion.up(1)),
+      ("rightarrow", Motion.right(1))
     ]
   )
   func basicMotions(key: String, expected: Motion) {

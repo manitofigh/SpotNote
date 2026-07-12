@@ -101,6 +101,12 @@ public final class SpotlightWindowController {
   private var measuredHeightCache: MeasuredHeightCache?
   private var programmaticFrameToIgnore: NSRect?
   private var cancellables: Set<AnyCancellable> = []
+  private struct FuzzyEditorSnapshot {
+    let chatID: UUID?
+    let selectedRange: NSRange
+    let selectionAffinity: NSSelectionAffinity
+  }
+  private var fuzzyEditorSnapshot: FuzzyEditorSnapshot?
 
   /// Layout above the editor card inside the panel (find bar + tutorial
   /// when visible). Used to map between `panel.top` and `editorTopY`.
@@ -211,10 +217,43 @@ public final class SpotlightWindowController {
   private func observeFuzzyPreview() {
     fuzzyController.$isVisible
       .combineLatest(fuzzyController.$results, fuzzyController.$selectedIndex)
-      .sink { [weak self] _, _, _ in
-        MainActor.assumeIsolated { self?.syncFuzzyPreviewPanel() }
+      .sink { [weak self] isVisible, _, _ in
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          if !isVisible { self.restoreFuzzyEditorState() }
+          self.syncFuzzyPreviewPanel()
+        }
       }
       .store(in: &cancellables)
+  }
+
+  private func restoreFuzzyEditorState() {
+    guard let snapshot = fuzzyEditorSnapshot else { return }
+    fuzzyEditorSnapshot = nil
+    focusTrigger.pulse()
+
+    // A palette dismissal can happen before SwiftUI has committed the
+    // editor's restored subtree. Wait one main-run-loop turn so the
+    // editor is present and its text has been updated before restoring
+    // the exact selection.
+    guard snapshot.chatID == session.currentID else { return }
+    DispatchQueue.main.async { [weak self] in
+      guard let self, let textView = self.editorTextView() else { return }
+      let length = (textView.string as NSString).length
+      let location = min(max(0, snapshot.selectedRange.location), length)
+      let selectionLength = min(
+        max(0, snapshot.selectedRange.length),
+        max(0, length - location)
+      )
+      let range = NSRange(location: location, length: selectionLength)
+      textView.window?.makeFirstResponder(textView)
+      textView.setSelectedRange(
+        range,
+        affinity: snapshot.selectionAffinity,
+        stillSelecting: false
+      )
+      textView.scrollRangeToVisible(range)
+    }
   }
 
   private func syncFuzzyPreviewPanel() {
@@ -320,6 +359,7 @@ public final class SpotlightWindowController {
   }
 
   public func close() {
+    if fuzzyController.isVisible { fuzzyController.close() }
     fuzzyPreviewPanel?.orderOut(nil)
     panel?.orderOut(nil)
     // If a bona-fide SpotNote window (Settings) is visible, leave the
@@ -415,6 +455,9 @@ public final class SpotlightWindowController {
         },
         onCommand: { [weak self] action in
           self?.executeCommandPaletteAction(action)
+        },
+        onFuzzyPick: { [weak self] chat in
+          self?.selectFuzzyResult(chat)
         }
       )
     )
@@ -463,6 +506,7 @@ public final class SpotlightWindowController {
   }
 
   private static let driftCorrectionThreshold: CGFloat = 4
+  private static let hudMoveStep: CGFloat = 40
 
   private func pinnedOrigin(for panel: NSPanel) -> NSPoint? {
     guard let screen = NSScreen.main else { return nil }
@@ -641,7 +685,22 @@ extension SpotlightWindowController {
     }
     let mask: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
     let mods = ShortcutModifierSet(event.modifierFlags.intersection(mask))
-    let chars = Shortcut.normalize(event.charactersIgnoringModifiers ?? "")
+    let chars = Shortcut.key(from: event)
+
+    // Search fields own their own edit history. Let Cmd-Z pass through to
+    // the focused palette/find field instead of undoing the note behind it.
+    let paletteIsVisible = MainActor.assumeIsolated {
+      commandController.isVisible || fuzzyController.isVisible || findController.isVisible
+    }
+    if mods == .command || mods == [.command, .shift], chars == "z" {
+      if paletteIsVisible { return false }
+      if mods == .command, let textView = editorTextView(), textView.canUndoText {
+        return textView.performTextUndo()
+      }
+      if mods == [.command, .shift], let textView = editorTextView() {
+        return textView.performTextRedo()
+      }
+    }
     let resolved = MainActor.assumeIsolated { shortcuts.match(key: chars, modifiers: mods) }
     guard let action = resolved else { return false }
     if action == .toggleHotkey || action == .appendToLastNote { return false }
@@ -682,7 +741,16 @@ extension SpotlightWindowController {
 
   private func openSelectedFuzzyResult() {
     guard let chat = fuzzyController.selectedChat() else { return }
-    session.jump(to: chat)
+    selectFuzzyResult(chat)
+  }
+
+  private func selectFuzzyResult(_ chat: Chat) {
+    // The fuzzy corpus is based on persisted chats while the editor can
+    // contain newer unsaved text. Reassigning the current chat here would
+    // replace that live text with the stale corpus snapshot.
+    if chat.id != session.currentID {
+      session.jump(to: chat)
+    }
     fuzzyController.close()
   }
 
@@ -714,6 +782,8 @@ extension SpotlightWindowController {
   // #lizard forgives
   private func dispatch(_ action: ShortcutAction) {
     switch action {
+    case .moveHUDLeft, .moveHUDRight, .moveHUDDown, .moveHUDUp:
+      moveHUD(action)
     case .newChat, .olderChat, .newerChat, .deleteChat, .undoDelete:
       dispatchSessionAction(action)
     case .findInNote:
@@ -723,7 +793,7 @@ extension SpotlightWindowController {
     case .fuzzyFindAll:
       if findController.isVisible { findController.close() }
       if commandController.isVisible { commandController.close() }
-      fuzzyController.toggle(corpus: session.chats)
+      toggleFuzzyPalette()
     case .commandPalette:
       if findController.isVisible { findController.close() }
       if fuzzyController.isVisible { fuzzyController.close() }
@@ -753,6 +823,47 @@ extension SpotlightWindowController {
     case .toggleTutorial: preferences.showHints.toggle()
     case .toggleHotkey, .appendToLastNote: break
     }
+  }
+
+  private func toggleFuzzyPalette() {
+    if fuzzyController.isVisible {
+      fuzzyController.close()
+      return
+    }
+
+    if let textView = editorTextView() {
+      fuzzyEditorSnapshot = FuzzyEditorSnapshot(
+        chatID: session.currentID,
+        selectedRange: textView.selectedRange,
+        selectionAffinity: textView.selectionAffinity
+      )
+    } else {
+      fuzzyEditorSnapshot = nil
+    }
+    fuzzyController.open(corpus: session.chats)
+  }
+
+  private func moveHUD(_ action: ShortcutAction) {
+    guard let panel else { return }
+    let step = Self.hudMoveStep
+    var frame = panel.frame
+    switch action {
+    case .moveHUDLeft: frame.origin.x -= step
+    case .moveHUDRight: frame.origin.x += step
+    case .moveHUDDown: frame.origin.y -= step
+    case .moveHUDUp: frame.origin.y += step
+    default: return
+    }
+    let screenFrame = (panel.screen ?? NSScreen.main)?.visibleFrame
+    if let screenFrame {
+      frame.origin.x = min(max(frame.origin.x, screenFrame.minX), screenFrame.maxX - frame.width)
+      frame.origin.y = min(max(frame.origin.y, screenFrame.minY), screenFrame.maxY - frame.height)
+    }
+    frame.origin.x = frame.origin.x.rounded()
+    frame.origin.y = frame.origin.y.rounded()
+    pinnedTopY = frame.maxY
+    editorTopY = frame.maxY - chromeAboveEditor
+    setPanelFrame(frame, display: true, animate: true)
   }
 
   private func editorTextView() -> PlaceholderTextView? {

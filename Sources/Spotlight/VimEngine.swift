@@ -264,10 +264,10 @@ final class VimEngine {
   private func motionForKey(_ key: String, count: Int) -> Motion? {
     // #lizard forgives
     switch key {
-    case "h": return .left(count)
-    case "l": return .right(count)
-    case "j": return .down(count)
-    case "k": return .up(count)
+    case "h", "leftarrow": return .left(count)
+    case "l", "rightarrow": return .right(count)
+    case "j", "downarrow": return .down(count)
+    case "k", "uparrow": return .up(count)
     case "w": return .wordForward(count)
     case "b": return .wordBackward(count)
     case "e": return .wordEnd(count)

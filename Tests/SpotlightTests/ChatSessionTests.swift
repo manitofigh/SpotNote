@@ -26,4 +26,25 @@ struct ChatSessionTests {
     #expect(session.navigationPreview == nil)
     #expect(!session.commitNavigationSelection())
   }
+
+  @Test("jumping to the current note preserves unsaved text")
+  func jumpingToCurrentNoteDoesNotReloadStaleSnapshot() async throws {
+    let dir = FileManager.default.temporaryDirectory.appending(
+      path: "spotnote-session-test-(UUID().uuidString)",
+      directoryHint: .isDirectory
+    )
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let store = try ChatStore(directory: dir, debounce: .milliseconds(20))
+    _ = try await store.create()
+    let session = ChatSession(store: store)
+    await session.bootstrap()
+    let current = try #require(session.currentChatSnapshot())
+
+    session.currentText = "unsaved draft"
+    var stale = current
+    stale.text = "stale persisted text"
+    session.jump(to: stale)
+
+    #expect(session.currentText == "unsaved draft")
+  }
 }

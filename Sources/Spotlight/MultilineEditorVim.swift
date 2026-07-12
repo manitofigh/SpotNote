@@ -52,6 +52,13 @@ extension PlaceholderTextView {
 
   private func vimKey(for event: NSEvent, mods: NSEvent.ModifierFlags, chars: String) -> String {
     if event.keyCode == 53 { return "\u{1B}" }
+    switch event.keyCode {
+    case 123: return "leftarrow"
+    case 124: return "rightarrow"
+    case 125: return "downarrow"
+    case 126: return "uparrow"
+    default: break
+    }
     if !mods.subtracting(.shift).isEmpty { return chars }
     return event.characters ?? chars
   }
@@ -156,7 +163,7 @@ extension PlaceholderTextView {
     case .deleteLineInsert(let count): executeDeleteLinesInsert(count)
     case .deleteChar(let count): executeDeleteChar(count)
     case .undo(let count):
-      for _ in 0..<count { undoManager?.undo() }
+      _ = performTextUndo(count: count)
     case .composite(let actions):
       for sub in actions { executeVimAction(sub) }
     case .gotoLine(let line):

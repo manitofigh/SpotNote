@@ -30,7 +30,10 @@ struct FuzzyPalette: View {
     }
     .background(Self.shape.fill(theme.background))
     .overlay(Self.shape.strokeBorder(theme.border, lineWidth: 1))
-    .onAppear { focused = true }
+    .task(id: controller.focusRequest) {
+      await Task.yield()
+      focused = true
+    }
   }
 
   private var searchField: some View {

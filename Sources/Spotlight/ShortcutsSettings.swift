@@ -34,6 +34,11 @@ struct ShortcutsPane: View {
         actions: [.findInNote, .fuzzyFindAll, .commandPalette, .openSettings, .toggleTutorial],
         store: shortcuts
       )
+      ShortcutGroup(
+        title: "HUD Position",
+        actions: [.moveHUDLeft, .moveHUDRight, .moveHUDDown, .moveHUDUp],
+        store: shortcuts
+      )
 
       SettingsPillButton("Reset all to defaults") { confirmResetAll = true }
         .confirmationDialog(
@@ -216,7 +221,7 @@ private struct ShortcutRecorderField: View {
       if event.keyCode == 53 { stopRecording() }
       return nil
     }
-    let chars = Shortcut.normalize(event.charactersIgnoringModifiers ?? "")
+    let chars = Shortcut.key(from: event)
     guard !chars.isEmpty else { return nil }
     let candidate = Shortcut(key: chars, modifiers: mods)
     switch store.setBinding(candidate, for: action) {

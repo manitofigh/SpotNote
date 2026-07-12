@@ -164,6 +164,14 @@ struct FuzzyControllerTests {
     #expect(controller.selectedChat()?.id == chats[0].id)
   }
 
+  @Test("opening advances the deferred focus request")
+  func openingRequestsFocus() {
+    let controller = FuzzyController()
+    let before = controller.focusRequest
+    controller.open(corpus: [makeChat("alpha")])
+    #expect(controller.focusRequest == before + 1)
+  }
+
   @Test("⌃W word delete trims the trailing word and any trailing whitespace")
   func ctrlWStripsTrailingWord() {
     #expect(SearchTextEditing.deleteWordBackward("hello world") == "hello ")

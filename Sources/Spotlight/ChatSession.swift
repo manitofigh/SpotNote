@@ -138,6 +138,7 @@ final class ChatSession: ObservableObject {
       previewDismissTask?.cancel()
       previewDismissTask = nil
     }
+    guard currentID != chat.id else { return }
     currentID = chat.id
     currentText = chat.text
   }

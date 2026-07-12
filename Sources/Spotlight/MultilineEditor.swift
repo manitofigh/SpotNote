@@ -93,6 +93,8 @@ struct MultilineEditor: NSViewRepresentable {
     textView.isEditable = true
     textView.isSelectable = true
     textView.allowsUndo = true
+    textView.undoManager?.levelsOfUndo = 0
+    textView.undoManager?.groupsByEvent = true
     textView.isHorizontallyResizable = false
     textView.isVerticallyResizable = true
     textView.textContainerInset = NSSize(width: EditorMetrics.textLeadingGap, height: 0)
@@ -120,7 +122,9 @@ struct MultilineEditor: NSViewRepresentable {
     guard let textView = scroll.documentView as? PlaceholderTextView else { return }
     context.coordinator.parent = self
     if textView.string != text {
+      textView.resetDocumentState()
       textView.string = text
+      textView.undoManager?.removeAllActions()
       refreshAttributes(on: textView)
       textView.vimController?.clearSearchStatus()
     }
@@ -231,53 +235,11 @@ struct MultilineEditor: NSViewRepresentable {
   /// which returns `.zero` for zero-length ranges at end-of-text and was
   /// the reason the inline math suggestion never appeared while typing.
   private func caretFrame(in textView: NSTextView, cursor: Int) -> NSRect? {
-    guard
-      let layoutManager = textView.layoutManager,
-      let textContainer = textView.textContainer
-    else { return nil }
-    layoutManager.ensureLayout(for: textContainer)
-    let origin = textView.textContainerOrigin
-    let nsString = textView.string as NSString
-    let length = nsString.length
-    if length == 0 {
-      return NSRect(
-        x: origin.x,
-        y: origin.y,
-        width: 0,
-        height: EditorMetrics.lineHeight
-      )
-    }
-    if cursor <= 0 {
-      let frag = layoutManager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
-      return NSRect(
-        x: origin.x + frag.minX,
-        y: origin.y + frag.minY,
-        width: 0,
-        height: frag.height
-      )
-    }
-    let priorChar = cursor - 1
-    if nsString.character(at: priorChar) == 0x0A {
-      let lastGlyph = max(0, layoutManager.numberOfGlyphs - 1)
-      let frag = layoutManager.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil)
-      return NSRect(
-        x: origin.x + frag.minX,
-        y: origin.y + frag.maxY,
-        width: 0,
-        height: frag.height
-      )
-    }
-    let priorGlyph = layoutManager.glyphIndexForCharacter(at: priorChar)
-    let frag = layoutManager.lineFragmentRect(forGlyphAt: priorGlyph, effectiveRange: nil)
-    let priorRect = layoutManager.boundingRect(
-      forGlyphRange: NSRange(location: priorGlyph, length: 1),
-      in: textContainer
-    )
-    return NSRect(
-      x: origin.x + priorRect.maxX,
-      y: origin.y + frag.minY,
+    editorCaretRect(
+      in: textView,
+      cursor: cursor,
       width: 0,
-      height: frag.height
+      fallbackHeight: EditorMetrics.lineHeight
     )
   }
 
@@ -456,9 +418,193 @@ struct MultilineEditor: NSViewRepresentable {
 
 }
 
+/// Returns a caret rect in text-view coordinates. The insertion point must
+/// be derived from one visual fragment: using the current glyph for Y and
+/// the previous glyph's ink bounds for X breaks at soft-wrap boundaries and
+/// after whitespace whose ink bounds are zero-width.
+@MainActor
+private struct EditorCaretContext {
+  let layoutManager: NSLayoutManager
+  let textView: NSTextView
+  let text: NSString
+  let length: Int
+  let origin: NSPoint
+  let width: CGFloat
+}
+
+@MainActor
+private func editorCaretRect(
+  in textView: NSTextView,
+  cursor requestedCursor: Int,
+  width: CGFloat,
+  fallbackHeight: CGFloat
+) -> NSRect? {
+  guard let layoutManager = textView.layoutManager,
+    let textContainer = textView.textContainer
+  else { return nil }
+  layoutManager.ensureLayout(for: textContainer)
+
+  let origin = textView.textContainerOrigin
+  let nsString = textView.string as NSString
+  let length = nsString.length
+  let cursor = min(max(0, requestedCursor), length)
+
+  guard length > 0, layoutManager.numberOfGlyphs > 0 else {
+    return NSRect(
+      x: origin.x,
+      y: origin.y,
+      width: width,
+      height: fallbackHeight
+    )
+  }
+  let context = EditorCaretContext(
+    layoutManager: layoutManager,
+    textView: textView,
+    text: nsString,
+    length: length,
+    origin: origin,
+    width: width
+  )
+
+  if cursor == length, nsString.character(at: length - 1) == 0x0A {
+    return editorCaretAtExtraLine(context)
+  }
+
+  if cursor == 0 || nsString.character(at: cursor - 1) == 0x0A {
+    return editorCaretAtLineStart(context, cursor: cursor)
+  }
+
+  let previousGlyph = layoutManager.glyphIndexForCharacter(at: cursor - 1)
+  let previousFragment = layoutManager.lineFragmentRect(
+    forGlyphAt: previousGlyph,
+    effectiveRange: nil
+  )
+  if let caret = editorCaretBeforeNextGlyph(
+    context,
+    cursor: cursor,
+    previousFragment: previousFragment
+  ) {
+    return caret
+  }
+
+  return editorCaretAfterLastGlyph(
+    context,
+    glyph: previousGlyph,
+    fragment: previousFragment
+  )
+}
+
+@MainActor
+private func editorCaretAtExtraLine(_ context: EditorCaretContext) -> NSRect {
+  let layoutManager = context.layoutManager
+  let extra = layoutManager.extraLineFragmentRect
+  if !extra.isEmpty {
+    return NSRect(
+      x: context.origin.x + extra.minX,
+      y: context.origin.y + extra.minY,
+      width: context.width,
+      height: extra.height
+    )
+  }
+  let lastFragment = layoutManager.lineFragmentRect(
+    forGlyphAt: layoutManager.numberOfGlyphs - 1,
+    effectiveRange: nil
+  )
+  return NSRect(
+    x: context.origin.x + lastFragment.minX,
+    y: context.origin.y + lastFragment.maxY,
+    width: context.width,
+    height: lastFragment.height
+  )
+}
+
+@MainActor
+private func editorCaretAtLineStart(
+  _ context: EditorCaretContext,
+  cursor: Int
+) -> NSRect {
+  let layoutManager = context.layoutManager
+  let glyph = min(
+    layoutManager.glyphIndexForCharacter(at: cursor),
+    layoutManager.numberOfGlyphs - 1
+  )
+  let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+  return NSRect(
+    x: context.origin.x + fragment.minX,
+    y: context.origin.y + fragment.minY,
+    width: context.width,
+    height: fragment.height
+  )
+}
+
+@MainActor
+private func editorCaretBeforeNextGlyph(
+  _ context: EditorCaretContext,
+  cursor: Int,
+  previousFragment: NSRect
+) -> NSRect? {
+  let layoutManager = context.layoutManager
+  guard cursor < context.length, context.text.character(at: cursor) != 0x0A else { return nil }
+  let nextGlyph = min(
+    layoutManager.glyphIndexForCharacter(at: cursor),
+    layoutManager.numberOfGlyphs - 1
+  )
+  let nextFragment = layoutManager.lineFragmentRect(forGlyphAt: nextGlyph, effectiveRange: nil)
+  if nextFragment.origin.y > previousFragment.origin.y + 0.5 {
+    return NSRect(
+      x: context.origin.x + nextFragment.minX,
+      y: context.origin.y + nextFragment.minY,
+      width: context.width,
+      height: nextFragment.height
+    )
+  }
+
+  // The next glyph's layout location is the exact insertion position,
+  // including trailing spaces and tabs that have no visible ink bounds.
+  let nextLocation = layoutManager.location(forGlyphAt: nextGlyph)
+  return NSRect(
+    x: context.origin.x + nextFragment.minX + nextLocation.x,
+    y: context.origin.y + nextFragment.minY,
+    width: context.width,
+    height: nextFragment.height
+  )
+}
+
+@MainActor
+private func editorCaretAfterLastGlyph(
+  _ context: EditorCaretContext,
+  glyph: Int,
+  fragment: NSRect
+) -> NSRect {
+  let layoutManager = context.layoutManager
+  let location = layoutManager.location(forGlyphAt: glyph)
+  let character = layoutManager.characterIndexForGlyph(at: glyph)
+  let composedRange = context.text.rangeOfComposedCharacterSequence(at: character)
+  let font =
+    (context.textView.textStorage?.attribute(.font, at: character, effectiveRange: nil) as? NSFont)
+    ?? context.textView.font
+    ?? .systemFont(ofSize: EditorMetrics.fontSize)
+  let advance = context.text.substring(with: composedRange).size(withAttributes: [.font: font]).width
+  return NSRect(
+    x: context.origin.x + fragment.minX + location.x + advance,
+    y: context.origin.y + fragment.minY,
+    width: context.width,
+    height: fragment.height
+  )
+}
+
 // MARK: - PlaceholderTextView
 
 final class PlaceholderTextView: NSTextView {
+  private let editorUndoManager: UndoManager = {
+    let manager = UndoManager()
+    manager.levelsOfUndo = 0
+    manager.groupsByEvent = true
+    return manager
+  }()
+
+  override var undoManager: UndoManager? { editorUndoManager }
+
   private enum RenderedTokenKind {
     case today
     case checklist
@@ -522,6 +668,17 @@ final class PlaceholderTextView: NSTextView {
     }
   }
 
+  func resetDocumentState() {
+    undoManager?.removeAllActions()
+    lastRenderedToken = nil
+    lastEditContext = nil
+    suppressedOccurrences.removeAll()
+    visualLineAnchor = nil
+    visualLineCaret = nil
+    vimEngine?.reset()
+    notifyVimModeChanged()
+  }
+
   override func layout() {
     super.layout()
     guard copyButtonClearance > 0, let container = textContainer else { return }
@@ -542,20 +699,14 @@ final class PlaceholderTextView: NSTextView {
     if revertRenderedTokenIfNeeded(event: event, mods: mods, chars: chars) {
       return
     }
+    if handleTextHistoryShortcut(mods: mods, chars: chars) { return }
     if let controller = vimController, controller.prompt != nil {
       if handlePromptKey(event: event, controller: controller, mods: mods) { return }
     }
     if commitNavigationSelectionIfNeeded(event: event, mods: mods) {
       return
     }
-    if mods == .control, chars == "w" {
-      deleteWordBackward(self)
-      return
-    }
-    if mods == .control, chars == "u" {
-      deleteToBeginningOfLine(self)
-      return
-    }
+    if handleControlDeletion(mods: mods, chars: chars) { return }
     if let engine = vimEngine {
       if !handleVimKey(event: event, engine: engine, mods: mods, chars: chars) {
         super.keyDown(with: event)
@@ -581,6 +732,32 @@ final class PlaceholderTextView: NSTextView {
     let isUndo = mods == .command && chars == "z"
     let isBackspace = mods.isEmpty && event.keyCode == 51
     return (isUndo || isBackspace) && revertLastRenderedTokenIfPossible()
+  }
+
+  private func handleTextHistoryShortcut(
+    mods: NSEvent.ModifierFlags,
+    chars: String
+  ) -> Bool {
+    guard chars == "z" else { return false }
+    if mods == .command { return performTextUndo() }
+    if mods == [.command, .shift] { return performTextRedo() }
+    return false
+  }
+
+  private func handleControlDeletion(
+    mods: NSEvent.ModifierFlags,
+    chars: String
+  ) -> Bool {
+    guard mods == .control else { return false }
+    if chars == "w" {
+      deleteWordBackward(self)
+      return true
+    }
+    if chars == "u" {
+      deleteToBeginningOfLine(self)
+      return true
+    }
+    return false
   }
 
   private func commitNavigationSelectionIfNeeded(
@@ -626,10 +803,42 @@ final class PlaceholderTextView: NSTextView {
   }
 
   override func tryToPerform(_ action: Selector, with object: Any?) -> Bool {
-    if action == Selector(("undo:")), revertLastRenderedTokenIfPossible() {
-      return true
+    if action == Selector(("undo:")) {
+      return performTextUndo()
+    }
+    if action == Selector(("redo:")) {
+      return performTextRedo()
     }
     return super.tryToPerform(action, with: object)
+  }
+
+  var canUndoText: Bool {
+    undoManager?.canUndo == true || lastRenderedToken != nil
+  }
+
+  @discardableResult
+  func performTextUndo(count: Int = 1) -> Bool {
+    if count == 1, revertLastRenderedTokenIfPossible() { return true }
+    guard count > 0, let manager = undoManager else { return false }
+    var didUndo = false
+    for _ in 0..<count {
+      guard manager.canUndo else { break }
+      manager.undo()
+      didUndo = true
+    }
+    return didUndo
+  }
+
+  @discardableResult
+  func performTextRedo(count: Int = 1) -> Bool {
+    guard count > 0, let manager = undoManager else { return false }
+    var didRedo = false
+    for _ in 0..<count {
+      guard manager.canRedo else { break }
+      manager.redo()
+      didRedo = true
+    }
+    return didRedo
   }
 
   func shouldAcceptSuggestion(event: NSEvent) -> Bool {
@@ -923,67 +1132,12 @@ final class PlaceholderTextView: NSTextView {
   }
 
   func normalizedInsertionPointRect(_ rect: NSRect) -> NSRect {
-    guard let layoutManager, let textContainer else { return rect }
-    layoutManager.ensureLayout(for: textContainer)
-    let nsString = string as NSString
-    guard nsString.length > 0, layoutManager.numberOfGlyphs > 0 else {
-      return NSRect(
-        x: rect.origin.x,
-        y: textContainerOrigin.y,
-        width: rect.width,
-        height: EditorMetrics.lineHeight
-      )
-    }
-    let cursor = min(selectedRange.location, nsString.length)
-    if cursor == nsString.length, cursor > 0, nsString.character(at: cursor - 1) == 0x0A {
-      let extra = layoutManager.extraLineFragmentRect
-      let originY: CGFloat
-      if !extra.isEmpty {
-        originY = textContainerOrigin.y + extra.origin.y
-      } else {
-        let lastGlyphIndex = max(0, layoutManager.numberOfGlyphs - 1)
-        let fragment = layoutManager.lineFragmentRect(forGlyphAt: lastGlyphIndex, effectiveRange: nil)
-        originY = textContainerOrigin.y + fragment.maxY
-      }
-      return NSRect(
-        x: textContainerOrigin.x + extra.origin.x,
-        y: originY,
-        width: rect.width,
-        height: EditorMetrics.lineHeight
-      )
-    }
-    let characterIndex = insertionPointReferenceCharacter(cursor: cursor, in: nsString)
-    let glyphIndex = min(
-      layoutManager.glyphIndexForCharacter(at: characterIndex),
-      max(0, layoutManager.numberOfGlyphs - 1)
-    )
-    let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
-    return NSRect(
-      x: insertionPointX(cursor: cursor, glyphIndex: glyphIndex, in: nsString),
-      y: textContainerOrigin.y + fragment.origin.y,
+    editorCaretRect(
+      in: self,
+      cursor: selectedRange.location,
       width: rect.width,
-      height: fragment.height
-    )
-  }
-
-  private func insertionPointReferenceCharacter(cursor: Int, in nsString: NSString) -> Int {
-    if cursor == nsString.length { return max(0, cursor - 1) }
-    if cursor > 0, nsString.character(at: cursor - 1) == 0x0A { return cursor }
-    return min(max(0, cursor), nsString.length - 1)
-  }
-
-  private func insertionPointX(cursor: Int, glyphIndex: Int, in nsString: NSString) -> CGFloat {
-    guard cursor > 0, nsString.character(at: cursor - 1) != 0x0A, let textContainer else {
-      let fragment = layoutManager?.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil) ?? .zero
-      return textContainerOrigin.x + fragment.minX
-    }
-    let priorGlyph = layoutManager?.glyphIndexForCharacter(at: cursor - 1) ?? glyphIndex
-    let priorRect =
-      layoutManager?.boundingRect(
-        forGlyphRange: NSRange(location: priorGlyph, length: 1),
-        in: textContainer
-      ) ?? .zero
-    return textContainerOrigin.x + priorRect.maxX
+      fallbackHeight: EditorMetrics.lineHeight
+    ) ?? rect
   }
 
   override func setNeedsDisplay(_ invalidRect: NSRect) {

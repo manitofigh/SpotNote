@@ -90,6 +90,22 @@ struct ShortcutStoreTests {
     #expect(Shortcut.normalize(",") == ",")
   }
 
+  @Test("arrow key codes normalize to shortcut keys")
+  func arrowKeyCodesNormalize() {
+    #expect(Shortcut.key(forKeyCode: 123) == "leftarrow")
+    #expect(Shortcut.key(forKeyCode: 124) == "rightarrow")
+    #expect(Shortcut.key(forKeyCode: 125) == "downarrow")
+    #expect(Shortcut.key(forKeyCode: 126) == "uparrow")
+  }
+
+  @Test("HUD movement defaults use cmd-option arrows")
+  func hudMovementDefaults() {
+    #expect(ShortcutAction.moveHUDLeft.defaultShortcut.displayString == "⌥⌘←")
+    #expect(ShortcutAction.moveHUDRight.defaultShortcut.displayString == "⌥⌘→")
+    #expect(ShortcutAction.moveHUDDown.defaultShortcut.displayString == "⌥⌘↓")
+    #expect(ShortcutAction.moveHUDUp.defaultShortcut.displayString == "⌥⌘↑")
+  }
+
   @Test("displayString renders modifiers in canonical macOS order")
   func displayStringOrder() {
     let chord = Shortcut(

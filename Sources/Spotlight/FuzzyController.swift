@@ -30,6 +30,7 @@ final class FuzzyController: ObservableObject {
   @Published var query: String = ""
   @Published private(set) var results: [FuzzyResult] = []
   @Published var selectedIndex: Int = 0
+  @Published private(set) var focusRequest: Int = 0
 
   static let resultLimit = 50
 
@@ -46,6 +47,7 @@ final class FuzzyController: ObservableObject {
     isVisible = true
     selectedIndex = 0
     refresh()
+    requestFocus()
   }
 
   func close() {
@@ -104,6 +106,10 @@ final class FuzzyController: ObservableObject {
     guard !results.isEmpty else { return }
     let next = (selectedIndex + delta + results.count) % results.count
     selectedIndex = next
+  }
+
+  func requestFocus() {
+    focusRequest &+= 1
   }
 
   /// Updates the in-memory corpus without resetting the visible query.

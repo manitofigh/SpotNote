@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Core
 import SwiftUI
 
 @MainActor
@@ -34,6 +35,7 @@ struct SpotlightRootView: View {
   /// already in normal mode).
   let onEscape: () -> Void
   let onCommand: (ShortcutAction) -> Void
+  let onFuzzyPick: (Chat) -> Void
 
   private var theme: Theme {
     let activeTheme = preferences.activeTheme
@@ -97,7 +99,7 @@ struct SpotlightRootView: View {
       }
       if fuzzy.isVisible {
         FuzzyPalette(controller: fuzzy, theme: theme) { chat in
-          session.jump(to: chat)
+          onFuzzyPick(chat)
         }
         .padding(.horizontal, EditorMetrics.outerPadding)
         .padding(.bottom, EditorMetrics.outerPadding)
