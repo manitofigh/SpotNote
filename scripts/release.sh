@@ -244,10 +244,8 @@ cat > "$RELEASE_NOTES_PATH" <<HTML
   <p>Published $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
   <h2>What’s new</h2>
   <ul>
-    <li>Command-P now focuses search immediately. Escape restores the previous note and caret; Enter opens another note or restores the caret when the current note is selected.</li>
-    <li>Command-Z and Vim <code>u</code> now provide unlimited text undo.</li>
-    <li>Caret placement now stays correct across wrapped lines, trailing whitespace, blank lines, and vertical arrow movement.</li>
-    <li>Option-Command plus an arrow key now moves the HUD.</li>
+    <li>New: word counter (disabled by default; enable it in Settings &gt; Editor).</li>
+    <li>Improved: the caret stays visible while navigating for easier tracking.</li>
   </ul>
 </body>
 </html>
