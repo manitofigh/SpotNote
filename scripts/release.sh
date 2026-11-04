@@ -57,11 +57,23 @@ detect_signing_identity() {
 }
 
 ensure_notary_profile() {
-  if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  local output
+  if output="$(xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" 2>&1)"; then
     return 0
   fi
-  echo "ERROR: Notary profile '$NOTARY_PROFILE' is missing."
-  echo "Run: ./scripts/setup_notary_profile.sh"
+  # Don't report every failure as a missing profile: an expired Apple
+  # Developer agreement (HTTP 403), a revoked app-specific password, or
+  # no network all fail this same check.
+  echo "ERROR: Notary check failed for profile '$NOTARY_PROFILE':"
+  echo "$output" | sed 's/^/  /'
+  if grep -q "403\|agreement" <<<"$output"; then
+    echo "Sign the pending agreement at https://developer.apple.com/account (Account Holder), then retry."
+  elif grep -qi "keychain\|profile\|not found\|No Keychain" <<<"$output"; then
+    echo "Run: SPOTNOTE_NOTARY_PASSWORD=<app-specific password> ./scripts/setup_notary_profile.sh"
+  elif grep -qi "401\|unauthori\|invalid credentials" <<<"$output"; then
+    echo "The stored app-specific password was rejected. Create a new one at https://account.apple.com"
+    echo "and re-run: SPOTNOTE_NOTARY_PASSWORD=<password> ./scripts/setup_notary_profile.sh"
+  fi
   exit 1
 }
 
