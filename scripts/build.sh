@@ -52,6 +52,17 @@ if [[ -f "$ICNS_PATH" ]]; then
   cp "$ICNS_PATH" "$RESOURCES/AppIcon.icns"
 fi
 
+# SwiftPM resource bundles (fonts, icons). The generated `Bundle.module`
+# accessor looks in `Bundle.main.resourceURL` first; without this copy it
+# only finds them via the absolute build path, so the .app would crash on
+# any other machine (or after `swift package clean`).
+shopt -s nullglob
+for bundle in "$BIN_PATH"/*.bundle; do
+  rm -rf "$RESOURCES/$(basename "$bundle")"
+  cp -R "$bundle" "$RESOURCES/"
+done
+shopt -u nullglob
+
 FRAMEWORKS_DIR="$CONTENTS/Frameworks"
 mkdir -p "$FRAMEWORKS_DIR"
 shopt -s nullglob
