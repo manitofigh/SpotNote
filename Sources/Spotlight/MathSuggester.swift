@@ -59,8 +59,15 @@ enum MathSuggester {
 
   private static func tryEvaluate(_ expr: String) -> Result? {
     guard expr.contains(where: { MathExpression.operators.contains($0) }) else { return nil }
+    // A lone negative literal ("-5") has no binary operator and is not
+    // worth suggesting; require at least one real operation.
+    guard let tokens = MathExpression.tokenize(expr),
+      tokens.contains(where: { $0.isBinaryOperator })
+    else { return nil }
     let base = detectBase(in: expr)
-    guard let value = MathExpression.evaluate(expr) else { return nil }
+    // Overflow (`2^10000`) or domain errors (`(-8)^0.5`) would otherwise
+    // render as "∞" / "NaN".
+    guard let value = MathExpression.evaluate(expr), value.isFinite else { return nil }
     return Result(answer: format(value, base: base), consumed: expr.count)
   }
 
@@ -143,6 +150,9 @@ enum MathSuggester {
     formatter.maximumFractionDigits = 6
     formatter.minimumFractionDigits = 0
     formatter.usesGroupingSeparator = false
+    // The input grammar only accepts "." as the decimal separator, so the
+    // answer must use it too regardless of the user's locale.
+    formatter.locale = Locale(identifier: "en_US_POSIX")
     return formatter.string(from: NSNumber(value: value)) ?? String(value)
   }
 }
@@ -152,6 +162,8 @@ enum MathSuggester {
 /// parser exceeds the project's per-type body-length lint threshold.
 enum MathExpression {
   static let operators: Set<Character> = ["+", "-", "*", "/", "%", "^"]
+  /// Internal token for prefix negation (`-2`, `3 * -(1 + 1)`).
+  static let unaryMinus: Character = "~"
 
   static func evaluate(_ expr: String) -> Double? {
     guard let tokens = tokenize(expr) else { return nil }
@@ -164,11 +176,17 @@ enum MathExpression {
     case op(Character)
     case lparen
     case rparen
+
+    var isBinaryOperator: Bool {
+      if case .op(let op) = self { return op != MathExpression.unaryMinus }
+      return false
+    }
   }
 
   // MARK: Tokenize
 
   // #lizard forgives
+  // swiftlint:disable:next cyclomatic_complexity
   static func tokenize(_ expr: String) -> [Token]? {
     var tokens: [Token] = []
     let chars = Array(expr)
@@ -187,6 +205,19 @@ enum MathExpression {
         continue
       }
       if let symbol = symbolToken(ch) {
+        // swiftlint:disable opening_brace
+        if case .op(let op) = symbol, op == "-" || op == "+",
+          isUnaryPosition(after: tokens.last),
+          idx + 1 < chars.count, !chars[idx + 1].isWhitespace
+        {
+          // swiftlint:enable opening_brace
+          // Prefix sign glued to its operand. A sign followed by a space
+          // ("- 2 + 2", a markdown bullet) stays binary and is rejected,
+          // letting the retry path evaluate the rest of the line.
+          if op == "-" { tokens.append(.op(unaryMinus)) }
+          idx += 1
+          continue
+        }
         if case .lparen = symbol {
           if case .number = tokens.last { return nil }
           if case .rparen = tokens.last { return nil }
@@ -198,6 +229,13 @@ enum MathExpression {
       return nil
     }
     return tokens.isEmpty ? nil : tokens
+  }
+
+  private static func isUnaryPosition(after previous: Token?) -> Bool {
+    switch previous {
+    case nil, .op, .lparen: return true
+    case .number, .rparen: return false
+    }
   }
 
   private static func symbolToken(_ ch: Character) -> Token? {
@@ -264,12 +302,17 @@ enum MathExpression {
     switch op {
     case "+", "-": return 1
     case "*", "/", "%": return 2
-    case "^": return 3
+    // Negation binds tighter than * / % but looser than ^, so
+    // `-2^2 == -4` and `2^-1 == 0.5`.
+    case unaryMinus: return 3
+    case "^": return 4
     default: return 0
     }
   }
 
-  private static func isRightAssociative(_ op: Character) -> Bool { op == "^" }
+  private static func isRightAssociative(_ op: Character) -> Bool {
+    op == "^" || op == unaryMinus
+  }
 
   static func shuntingYard(_ tokens: [Token]) -> [Token]? {
     var output: [Token] = []
@@ -289,7 +332,11 @@ enum MathExpression {
     case .number:
       output.append(token)
     case .op(let op):
-      drainOperators(higherThan: op, output: &output, stack: &stack)
+      // Prefix operators have no left operand, so nothing on the stack
+      // can be reduced before them.
+      if op != unaryMinus {
+        drainOperators(higherThan: op, output: &output, stack: &stack)
+      }
       stack.append(token)
     case .lparen:
       stack.append(token)
@@ -331,6 +378,9 @@ enum MathExpression {
       switch token {
       case .number(let value):
         stack.append(value)
+      case .op(let op) where op == unaryMinus:
+        guard let operand = stack.popLast() else { return nil }
+        stack.append(-operand)
       case .op(let op):
         guard let rhs = stack.popLast(), let lhs = stack.popLast() else { return nil }
         guard let value = applyBinary(op, lhs, rhs) else { return nil }

@@ -35,8 +35,7 @@ final class GlobalHotkey {
     Self.installHandlerIfNeeded()
     unregister()
     let hkID = EventHotKeyID(signature: OSType(0x534E_5448), id: hotkeyID)  // 'SNTH'
-    Self.handlersByID[hotkeyID] = handler
-    RegisterEventHotKey(
+    let status = RegisterEventHotKey(
       keyCode,
       Self.carbonModifiers(shortcut.modifiers),
       hkID,
@@ -44,6 +43,14 @@ final class GlobalHotkey {
       0,
       &hotKeyRef
     )
+    // A chord already claimed by another app (eventHotKeyExistsErr)
+    // fails here; report it so the caller can fall back to the default
+    // instead of leaving the hotkey silently dead.
+    guard status == noErr, hotKeyRef != nil else {
+      hotKeyRef = nil
+      return false
+    }
+    Self.handlersByID[hotkeyID] = handler
     return true
   }
 

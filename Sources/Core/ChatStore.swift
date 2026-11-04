@@ -78,8 +78,10 @@ public actor ChatStore {
   public func create() throws -> Chat {
     let now = Date()
     let chat = Chat(id: UUID(), createdAt: now, updatedAt: now, text: "")
-    chats[chat.id] = chat
+    // Persist before inserting so a failed write doesn't leave a ghost
+    // chat that is listed in memory but vanishes on next launch.
     try persistNow(chat)
+    chats[chat.id] = chat
     return chat
   }
 
@@ -111,8 +113,8 @@ public actor ChatStore {
     var inserted: [Chat] = []
     for chat in imported {
       let resolved = uniqueImportedChat(from: chat)
-      chats[resolved.id] = resolved
       try persistNow(resolved)
+      chats[resolved.id] = resolved
       inserted.append(resolved)
     }
     return inserted
@@ -138,9 +140,18 @@ public actor ChatStore {
   /// Awaits every pending debounced write. Call before app termination
   /// or when the user triggers an explicit navigation that should
   /// observe current on-disk state.
+  ///
+  /// Pending writes are performed immediately rather than waiting out
+  /// the remaining debounce window, and without suspending, so an edit
+  /// arriving mid-flush can't slip past it and quitting stays fast.
   public func flush() async {
-    let tasks = Array(pendingWrites.values)
-    for task in tasks { await task.value }
+    let ids = Array(pendingWrites.keys)
+    for id in ids {
+      pendingWrites[id]?.cancel()
+      pendingWrites[id] = nil
+      guard let chat = chats[id] else { continue }
+      try? persistNow(chat)
+    }
   }
 
   // MARK: - Private

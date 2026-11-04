@@ -188,7 +188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillTerminate(_ notification: Notification) {
     let store = chatStore
     let semaphore = DispatchSemaphore(value: 0)
-    Task {
+    // Detached: the main thread is blocked on the semaphore below, so a
+    // main-actor-inherited Task would never start and the flush would
+    // just time out.
+    Task.detached {
       await store.flush()
       semaphore.signal()
     }

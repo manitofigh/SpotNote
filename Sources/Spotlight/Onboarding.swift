@@ -106,17 +106,19 @@ public final class OnboardingController: NSObject, NSWindowDelegate {
   }
 
   private func finish(completed: Bool) {
+    // Both the window close button and the model's completion path can
+    // land here; only the first call should tear down and notify.
+    guard let win = window else { return }
     Self.markCompleted()
-    let win = window
     window = nil
     hostedModel = nil
     NSAnimationContext.runAnimationGroup({ ctx in
       ctx.duration = 0.55
       ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-      win?.animator().alphaValue = 0
+      win.animator().alphaValue = 0
     })
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [onFinished] in
-      win?.orderOut(nil)
+      win.orderOut(nil)
       onFinished(completed)
     }
   }
@@ -761,7 +763,11 @@ private struct KeyMonitor: NSViewRepresentable {
       monitor = NSEvent.addLocalMonitorForEvents(matching: mask) { event in
         let flags = event.modifierFlags
         let type = event.type
-        let key = Shortcut.normalize(event.charactersIgnoringModifiers ?? "")
+        // `Shortcut.key(from:)` returns "" for `.flagsChanged` instead of
+        // raising (reading `charactersIgnoringModifiers` on a non-key
+        // event throws), and resolves keys the same way the recorder
+        // stored them (arrows, shifted punctuation).
+        let key = Shortcut.key(from: event)
         var swallow = false
         MainActor.assumeIsolated {
           model.updateModifiers(flags)

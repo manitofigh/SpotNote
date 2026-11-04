@@ -139,8 +139,15 @@ final class ChatSession: ObservableObject {
       previewDismissTask = nil
     }
     guard currentID != chat.id else { return }
+    // `chats` is only refreshed from the store on list-changing actions,
+    // so the entry for the chat being left still holds the text from the
+    // last refresh. Patch it with the live editor text before switching;
+    // otherwise jumping back to it later (palette / append chord, both
+    // fed from `chats`) would reload the stale text and the next
+    // keystroke would persist it over the user's edits.
+    syncCurrentTextIntoChats()
     currentID = chat.id
-    currentText = chat.text
+    currentText = chats.first(where: { $0.id == chat.id })?.text ?? chat.text
   }
 
   /// Binds to ⌘D -- removes the current chat and lands on the next
@@ -209,6 +216,19 @@ final class ChatSession: ObservableObject {
   }
 
   // MARK: - Private
+
+  private func syncCurrentTextIntoChats() {
+    guard let id = currentID,
+      let index = chats.firstIndex(where: { $0.id == id }),
+      chats[index].text != currentText
+    else { return }
+    chats[index].text = currentText
+    chats[index].updatedAt = Date()
+    chats.sort { lhs, rhs in
+      if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+      return lhs.updatedAt > rhs.updatedAt
+    }
+  }
 
   private func createBlankChat() async -> Bool {
     guard let chat = try? await store.create() else { return false }

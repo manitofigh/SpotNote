@@ -43,12 +43,31 @@ public struct Shortcut: Codable, Hashable, Sendable {
   }
 
   public static func key(from event: NSEvent) -> String {
+    // `characters*` raise NSInternalInconsistencyException on non-key
+    // events (e.g. `.flagsChanged`), so bail out before touching them.
+    guard event.type == .keyDown || event.type == .keyUp else { return "" }
     if let key = key(forKeyCode: event.keyCode) { return key }
+    // `charactersIgnoringModifiers` still applies Shift, so ⌘⇧. reports
+    // ">" and ⌘⇧/ reports "?". Strip Shift (keeping ⌘ so "Dvorak - QWERTY
+    // ⌘" layouts still resolve) so the stored key is the unshifted base
+    // character -- the same form the defaults and the Carbon keycode
+    // table use.
+    // swiftlint:disable opening_brace
+    if event.modifierFlags.contains(.shift),
+      let base = event.characters(byApplyingModifiers: event.modifierFlags.intersection(.command)),
+      !base.isEmpty
+    {
+      // swiftlint:enable opening_brace
+      return normalize(base)
+    }
     return normalize(event.charactersIgnoringModifiers ?? "")
   }
 
   static func key(forKeyCode keyCode: UInt16) -> String? {
     switch keyCode {
+    case 36: return "return"
+    case 48: return "tab"
+    case 53: return "escape"
     case 123: return "leftarrow"
     case 124: return "rightarrow"
     case 125: return "downarrow"
@@ -225,7 +244,11 @@ public final class ShortcutStore: ObservableObject {
 
   @discardableResult
   public func setBinding(_ shortcut: Shortcut, for action: ShortcutAction) -> SetResult {
-    guard !shortcut.modifiers.isEmpty else { return .missingModifier }
+    // Shift alone doesn't take a chord out of the typing space: ⇧A would
+    // shadow typing a capital "A" and ⇧← would steal selection extension.
+    guard !shortcut.modifiers.isEmpty, shortcut.modifiers != .shift else {
+      return .missingModifier
+    }
     if let other = bindings.first(where: { $0.key != action && $0.value == shortcut })?.key {
       return .conflict(other)
     }

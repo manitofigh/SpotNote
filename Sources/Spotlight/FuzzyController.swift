@@ -167,7 +167,9 @@ final class FuzzyController: ObservableObject {
   }
 
   nonisolated static func previewLine(_ text: String) -> String {
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+    // `\.isNewline`, not `"\n"`: a CRLF pair is a single `Character`
+    // that never equals "\n", so splitting on "\n" misses CRLF notes.
+    for line in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
       let trimmed = line.trimmingCharacters(in: .whitespaces)
       if !trimmed.isEmpty { return String(trimmed.prefix(120)) }
     }
@@ -280,10 +282,15 @@ final class FuzzyController: ObservableObject {
 
   private nonisolated static func firstNonEmptyLine(in text: String) -> (text: String, offset: Int) {
     var offset = 0
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+    for line in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
       let raw = String(line)
-      let leadingWhitespace = raw.prefix(while: \.isWhitespace).count
-      let trimmed = raw.trimmingCharacters(in: .whitespaces)
+      // Strip leading whitespace with the same predicate used to count it
+      // so the reported offset always matches the returned title; mixing
+      // `Character.isWhitespace` with `CharacterSet.whitespaces` shifted
+      // highlight ranges whenever a line began with e.g. "\r".
+      let afterLeading = raw.drop(while: \.isWhitespace)
+      let leadingWhitespace = raw.count - afterLeading.count
+      let trimmed = String(afterLeading).trimmingCharacters(in: .whitespaces)
       if !trimmed.isEmpty { return (trimmed, offset + leadingWhitespace) }
       offset += raw.count + 1
     }
@@ -294,8 +301,9 @@ final class FuzzyController: ObservableObject {
     guard let offset, !text.isEmpty else { return previewLine(text) }
     let clamped = max(0, min(offset, text.count - 1))
     let index = text.index(text.startIndex, offsetBy: clamped)
-    let start = text[..<index].lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
-    let end = text[index...].firstIndex(of: "\n") ?? text.endIndex
+    let start =
+      text[..<index].lastIndex(where: \.isNewline).map { text.index(after: $0) } ?? text.startIndex
+    let end = text[index...].firstIndex(where: \.isNewline) ?? text.endIndex
     let line = text[start..<end].trimmingCharacters(in: .whitespaces)
     if line.isEmpty { return previewLine(text) }
     return String(line.prefix(120))

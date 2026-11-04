@@ -30,7 +30,7 @@ struct ChatSessionTests {
   @Test("jumping to the current note preserves unsaved text")
   func jumpingToCurrentNoteDoesNotReloadStaleSnapshot() async throws {
     let dir = FileManager.default.temporaryDirectory.appending(
-      path: "spotnote-session-test-(UUID().uuidString)",
+      path: "spotnote-session-test-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

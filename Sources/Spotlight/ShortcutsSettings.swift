@@ -10,7 +10,7 @@ struct ShortcutsPane: View {
       VStack(alignment: .leading, spacing: 6) {
         Text("Shortcuts")
           .font(.system(.title, design: .default, weight: .bold))
-        Text("Click any shortcut to record a new chord. A modifier (⌘ ⇧ ⌃ ⌥) is required.")
+        Text("Click any shortcut to record a new chord. A modifier (⌘ ⌃ ⌥, optionally with ⇧) is required.")
           .font(.subheadline)
           .foregroundStyle(.secondary)
       }
@@ -139,6 +139,11 @@ private struct ShortcutRecorderField: View {
       capsContent
       trailingButton
     }
+    // Tear down the key monitor if the row goes away mid-recording
+    // (switching settings panes, closing the window). Otherwise the
+    // monitor outlives the view and keeps swallowing every keyDown in
+    // the app.
+    .onDisappear { stopRecording() }
     .confirmationDialog(
       Text("Reset \(action.displayName)?"),
       isPresented: $confirmReset,

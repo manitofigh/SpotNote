@@ -120,7 +120,7 @@ enum ChatTransferService {
     return try writeMarkdownFiles(chats: chats, to: directory)
   }
 
-  private static func writeMarkdownFiles(chats: [Chat], to directory: URL) throws -> [URL] {
+  static func writeMarkdownFiles(chats: [Chat], to directory: URL) throws -> [URL] {
     let scoped = directory.startAccessingSecurityScopedResource()
     defer {
       if scoped { directory.stopAccessingSecurityScopedResource() }
@@ -148,8 +148,16 @@ enum ChatTransferService {
       let suffix = counter == 1 ? "" : " \(counter)"
       let fileName = "\(baseName)\(suffix).md"
       let candidate = directory.appending(path: fileName, directoryHint: .notDirectory)
-      if !reservedNames.contains(fileName), !FileManager.default.fileExists(atPath: candidate.path) {
-        reservedNames.insert(fileName)
+      // Compare case-insensitively: the default APFS volume is
+      // case-insensitive, so "Todo.md" and "todo.md" are the same file
+      // and the second write would silently overwrite the first.
+      let reservationKey = fileName.lowercased()
+      // swiftlint:disable opening_brace
+      if !reservedNames.contains(reservationKey),
+        !FileManager.default.fileExists(atPath: candidate.path)
+      {
+        // swiftlint:enable opening_brace
+        reservedNames.insert(reservationKey)
         return candidate
       }
       counter += 1
@@ -183,7 +191,15 @@ enum MarkdownNoteCodec {
   }
 
   static func decode(_ markdown: String) -> String {
-    markdown
+    // `String(contentsOf:encoding: .utf8)` keeps a leading byte-order
+    // mark (common in files saved by Windows editors); drop it so the
+    // imported note doesn't start with an invisible U+FEFF.
+    var unmarked = markdown
+    if unmarked.unicodeScalars.first == "\u{FEFF}" {
+      unmarked = String(unmarked.unicodeScalars.dropFirst())
+    }
+    return
+      unmarked
       .replacingOccurrences(of: "\r\n", with: "\n")
       .replacingOccurrences(of: "\r", with: "\n")
       .replacingOccurrences(of: "[x]", with: "☑", options: .caseInsensitive)
