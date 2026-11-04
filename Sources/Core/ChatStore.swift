@@ -90,7 +90,10 @@ public actor ChatStore {
   /// disk write at the end of the window -- this is what keeps large
   /// paste-then-edit flows cheap.
   public func update(id: UUID, text: String) {
-    guard var chat = chats[id] else { return }
+    // Unchanged text is a no-op, so callers can safely re-send the live
+    // editor contents (e.g. on quit) without bumping `updatedAt` and
+    // reshuffling the note order.
+    guard var chat = chats[id], chat.text != text else { return }
     chat.text = text
     chat.updatedAt = Date()
     chats[id] = chat

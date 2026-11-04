@@ -187,11 +187,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationWillTerminate(_ notification: Notification) {
     let store = chatStore
+    // The last keystrokes may still be queued in an unstructured
+    // main-actor save task that can't run while we block below; hand the
+    // live editor text to the store directly.
+    let unsaved = spotlight.unsavedEditorSnapshot()
     let semaphore = DispatchSemaphore(value: 0)
     // Detached: the main thread is blocked on the semaphore below, so a
     // main-actor-inherited Task would never start and the flush would
     // just time out.
     Task.detached {
+      if let unsaved { await store.update(id: unsaved.id, text: unsaved.text) }
       await store.flush()
       semaphore.signal()
     }

@@ -35,6 +35,10 @@ struct MultilineEditor: NSViewRepresentable {
   /// Range to select and scroll into view -- driven by the find bar's
   /// current match. `nil` leaves the user's selection / cursor alone.
   var findHighlight: NSRange?
+  /// `FindController.revealRequest`; the editor selects `findHighlight`
+  /// only when this changes (explicit search / next / previous), never
+  /// because an edit re-ran the search and shifted the match.
+  var findRevealRequest: Int = 0
   var vimModeEnabled: Bool = false
   /// When `false`, long lines extend past the right edge and the editor
   /// scrolls horizontally (overlay scroller, fades when idle) instead of
@@ -255,7 +259,7 @@ struct MultilineEditor: NSViewRepresentable {
     var parent: MultilineEditor
     var lastFocusRequest: Int = -1
     var lastCaretEndRequest: Int = 0
-    var lastFindHighlight: NSRange?
+    var lastFindReveal: Int = 0
     var normalizedTextAwaitingNotification: String?
 
     init(_ parent: MultilineEditor) { self.parent = parent }
@@ -306,17 +310,16 @@ struct MultilineEditor: NSViewRepresentable {
   }
 
   private func applyFindHighlight(textView: NSTextView, coordinator: Coordinator) {
+    guard coordinator.lastFindReveal != findRevealRequest else { return }
     guard let range = findHighlight else {
-      coordinator.lastFindHighlight = nil
+      coordinator.lastFindReveal = findRevealRequest
       return
     }
     let length = (textView.string as NSString).length
-    let valid =
-      range.location != NSNotFound
-      && range.location + range.length <= length
-      && coordinator.lastFindHighlight != range
-    guard valid else { return }
-    coordinator.lastFindHighlight = range
+    // Text may not have caught up yet (e.g. right after a note switch);
+    // keep the request pending and retry on the next update.
+    guard range.location != NSNotFound, range.location + range.length <= length else { return }
+    coordinator.lastFindReveal = findRevealRequest
     textView.setSelectedRange(range)
     textView.scrollRangeToVisible(range)
   }

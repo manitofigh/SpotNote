@@ -24,6 +24,10 @@ final class FindController: ObservableObject {
   @Published var query: String = ""
   @Published private(set) var matches: [NSRange] = []
   @Published private(set) var currentIndex: Int = 0
+  /// Bumped whenever the editor should jump to `currentMatch`. Edits that
+  /// merely re-run the search pass `reveal: false` so typing never pulls
+  /// the caret to a match.
+  @Published private(set) var revealRequest: Int = 0
 
   init() {}
 
@@ -52,7 +56,8 @@ final class FindController: ObservableObject {
     }
   }
 
-  func search(in text: String) {
+  func search(in text: String, reveal: Bool = true) {
+    if reveal { revealRequest &+= 1 }
     if query.isEmpty {
       matches = []
       currentIndex = 0
@@ -75,11 +80,13 @@ final class FindController: ObservableObject {
   func next() {
     guard !matches.isEmpty else { return }
     currentIndex = (currentIndex + 1) % matches.count
+    revealRequest &+= 1
   }
 
   func previous() {
     guard !matches.isEmpty else { return }
     currentIndex = (currentIndex - 1 + matches.count) % matches.count
+    revealRequest &+= 1
   }
 }
 
@@ -127,6 +134,8 @@ final class CommandController: ObservableObject {
   }
 
   func setQuery(_ value: String) {
+    // Return re-commits the TextField's text; don't reset the selection.
+    guard value != query else { return }
     query = value
     selectedIndex = 0
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

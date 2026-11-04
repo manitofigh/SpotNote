@@ -58,7 +58,9 @@ struct SpotlightRootView: View {
         guard session.currentText != newValue else { return }
         session.currentText = newValue
         session.persistIfNeeded()
-        if find.isVisible { find.search(in: newValue) }
+        // Keep matches in sync for both the find bar and a vim `/`
+        // search (which sets the query without showing the bar).
+        if !find.query.isEmpty { find.search(in: newValue, reveal: false) }
       }
     )
   }
@@ -144,6 +146,10 @@ struct SpotlightRootView: View {
     .animation(.easeOut(duration: 0.10), value: find.isVisible)
     .animation(.easeOut(duration: 0.10), value: fuzzy.isVisible)
     .animation(.easeOut(duration: 0.10), value: command.isVisible)
+    .onChange(of: session.currentID) { _, _ in
+      // Match ranges belong to the previous note's text.
+      if !find.query.isEmpty { find.search(in: session.currentText, reveal: false) }
+    }
     .onChange(of: session.chats) { _, newChats in
       fuzzy.updateCorpus(newChats)
     }
@@ -200,6 +206,7 @@ struct SpotlightRootView: View {
       maxVisibleLines: preferences.maxVisibleLines,
       extraChromeHeight: extraChromeHeight,
       findHighlight: find.currentMatch,
+      findRevealRequest: find.revealRequest,
       vimModeEnabled: preferences.vimMode,
       wrapLines: preferences.wrapLines,
       vimController: vimController,

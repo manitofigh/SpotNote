@@ -232,3 +232,35 @@ struct CommandControllerTests {
     #expect(controller.focusRequest == openedRequest + 1)
   }
 }
+
+@MainActor
+@Suite("Palette selection survives query re-commit")
+struct PaletteSelectionRecommitTests {
+  @Test("re-sending the same fuzzy query keeps the selected result")
+  func fuzzySameQueryKeepsSelection() async throws {
+    let now = Date()
+    let chats = (0..<3).map {
+      Chat(id: UUID(), createdAt: now, updatedAt: now, text: "banana note \($0)")
+    }
+    let controller = FuzzyController(debounce: .milliseconds(1))
+    controller.open(corpus: chats)
+    controller.setQuery("banana")
+    try await Task.sleep(for: .milliseconds(150))
+    controller.moveSelection(by: 1)
+    let picked = controller.selectedChat()
+    controller.setQuery("banana")  // what TextField does on Return
+    #expect(controller.selectedIndex == 1)
+    #expect(controller.selectedChat() == picked)
+  }
+
+  @Test("re-sending the same command query keeps the selected row")
+  func commandSameQueryKeepsSelection() {
+    let defaults = UserDefaults(suiteName: "spotnote.test.recommit.\(UUID().uuidString)") ?? .standard
+    let controller = CommandController()
+    controller.open(shortcuts: ShortcutStore(defaults: defaults), preferences: ThemePreferences(defaults: defaults))
+    controller.setQuery("note")
+    controller.moveSelection(by: 1)
+    controller.setQuery("note")
+    #expect(controller.selectedIndex == 1)
+  }
+}

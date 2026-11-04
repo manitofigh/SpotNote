@@ -53,6 +53,10 @@ final class ChatSession: ObservableObject {
   /// navigation overlay stays put. Driven by the window controller's
   /// modifier-key monitor (typically the ⌃ key for ⌃N/⌃P cycling).
   private var keepNavigationOpen = false
+  /// When the open note was last edited in this session (see
+  /// `mostRecentlyEditedChat`). Reset whenever a different note opens.
+  private var lastLocalEdit: Date?
+  private var lastLocalEditID: UUID?
   private static let previewDismissDelay: Duration = .milliseconds(1400)
   private static let deletePreviewDelay: Duration = .milliseconds(4000)
 
@@ -74,6 +78,9 @@ final class ChatSession: ObservableObject {
   }
 
   func reload() async {
+    // A keystroke's save runs in an unstructured task; push the live text
+    // first so reloading can't replace it with an older stored copy.
+    if let id = currentID { await store.update(id: id, text: currentText) }
     await store.flush()
     chats = await store.list()
     if let id = currentID, let current = chats.first(where: { $0.id == id }) {
@@ -84,6 +91,23 @@ final class ChatSession: ObservableObject {
     } else {
       _ = await createBlankChat()
     }
+  }
+
+  /// The note `appendToLastNote` should open: the most recently edited
+  /// one, not `chats.first` (pinned notes sort first). The open note's
+  /// edits count even though `chats` is only refreshed on list changes.
+  func mostRecentlyEditedChat() -> Chat? {
+    func editedAt(_ chat: Chat) -> Date {
+      guard chat.id == lastLocalEditID, let lastLocalEdit else { return chat.updatedAt }
+      return max(chat.updatedAt, lastLocalEdit)
+    }
+    return chats.max { editedAt($0) < editedAt($1) }
+  }
+
+  /// Live editor contents for a final synchronous-ish save (app quit).
+  func unsavedSnapshot() -> (id: UUID, text: String)? {
+    guard let id = currentID else { return nil }
+    return (id, currentText)
   }
 
   func currentChatSnapshot() -> Chat? {
@@ -210,6 +234,8 @@ final class ChatSession: ObservableObject {
       previewDismissTask = nil
     }
     guard let id = currentID else { return }
+    lastLocalEdit = Date()
+    lastLocalEditID = id
     let snapshot = currentText
     let store = store
     Task { await store.update(id: id, text: snapshot) }

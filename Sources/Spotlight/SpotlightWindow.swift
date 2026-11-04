@@ -406,7 +406,7 @@ public final class SpotlightWindowController {
       NSApp.activate(ignoringOtherApps: true)
       if let panel { bringPanelToFront(panel) }
     }
-    if let mostRecent = session.chats.first {
+    if let mostRecent = session.mostRecentlyEditedChat() {
       session.jump(to: mostRecent)
     }
     // Defer the caret bump one runloop tick so SwiftUI has a chance to
@@ -415,6 +415,11 @@ public final class SpotlightWindowController {
     DispatchQueue.main.async { [weak self] in
       self?.focusTrigger.requestCaretEnd()
     }
+  }
+
+  /// The note currently in the editor, for a final save on quit.
+  public func unsavedEditorSnapshot() -> (id: UUID, text: String)? {
+    session.unsavedSnapshot()
   }
 
   public func reloadLibrary() {

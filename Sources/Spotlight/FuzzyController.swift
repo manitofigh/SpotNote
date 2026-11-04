@@ -64,8 +64,20 @@ final class FuzzyController: ObservableObject {
   }
 
   func setQuery(_ value: String) {
+    // SwiftUI's TextField re-sends its current text through the binding
+    // when Return commits the field. Treating that as a new query reset
+    // the selection to the first result right before `onSubmit` read it,
+    // so ⌃N/⌃P (or arrow) navigation was lost and Return opened the top
+    // hit -- usually the note already open.
+    guard value != query else { return }
     query = value
     selectedIndex = 0
+    runSearch(value)
+  }
+
+  /// Ranks `value` against the corpus. Leaves `selectedIndex` alone
+  /// (only clamping it), so corpus refreshes keep the user's selection.
+  private func runSearch(_ value: String) {
     pendingSearch?.cancel()
     let snapshot = corpus
     let needle = value
@@ -121,7 +133,7 @@ final class FuzzyController: ObservableObject {
   }
 
   private func refresh() {
-    setQuery(query)
+    runSearch(query)
   }
 
   /// Pure scoring entry point used by both the palette refresh path

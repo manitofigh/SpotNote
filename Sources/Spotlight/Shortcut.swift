@@ -283,7 +283,7 @@ public final class ShortcutStore: ObservableObject {
     if let decoded {
       for (raw, shortcut) in decoded {
         if let action = ShortcutAction(rawValue: raw) {
-          loaded[action] = shortcut
+          loaded[action] = migrated(shortcut)
         }
       }
     }
@@ -292,6 +292,31 @@ public final class ShortcutStore: ObservableObject {
       result[action] = loaded[action] ?? action.defaultShortcut
     }
     return result
+  }
+
+  /// US-layout shifted characters -> their unshifted base key.
+  private static let shiftedBaseKeys: [String: String] = [
+    ">": ".", "<": ",", "?": "/", ":": ";", "\"": "'", "{": "[", "}": "]",
+    "|": "\\", "+": "=", "_": "-", "~": "`", "!": "1", "@": "2", "#": "3",
+    "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0"
+  ]
+
+  /// Older builds recorded ⇧+punctuation as the shifted character (⌘⇧.
+  /// stored ">") and Return/Tab/Esc as raw control characters. Those no
+  /// longer match what `Shortcut.key(from:)` produces, so rewrite them on
+  /// load instead of silently dropping the user's binding.
+  static func migrated(_ shortcut: Shortcut) -> Shortcut {
+    let key = shortcut.key
+    switch key {
+    case "\r": return Shortcut(key: "return", modifiers: shortcut.modifiers)
+    case "\t": return Shortcut(key: "tab", modifiers: shortcut.modifiers)
+    case "\u{1B}": return Shortcut(key: "escape", modifiers: shortcut.modifiers)
+    default: break
+    }
+    guard shortcut.modifiers.contains(.shift), let base = shiftedBaseKeys[key] else {
+      return Shortcut(key: Shortcut.normalize(key), modifiers: shortcut.modifiers)
+    }
+    return Shortcut(key: base, modifiers: shortcut.modifiers)
   }
 
   private func persist() {
