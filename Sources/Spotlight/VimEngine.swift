@@ -112,6 +112,7 @@ final class VimEngine {
 
   // swiftlint:disable:next cyclomatic_complexity
   private func handlePending(key: String) -> VimAction {
+    // #lizard forgives
     let count = resolvedCount
     defer { clearAccumulator() }
 
