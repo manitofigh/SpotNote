@@ -30,6 +30,75 @@ struct MultilineEditorVimLogicalLineMotionTests {
     #expect(textView.selectedRange.location == ("before\n```swift\n" as NSString).length)
   }
 
+  @Test("normal mode j and k follow soft-wrapped visual rows")
+  func verticalMotionsFollowSoftWraps() {
+    let textView = makeVimMotionTextView(
+      text: "abcdefghijklmnop qrstuvwxyz",
+      width: 58
+    )
+    textView.vimModeEnabled = true
+    textView.setSelectedRange(NSRange(location: 0, length: 0))
+    let firstRow = textView.normalizedInsertionPointRect(
+      NSRect(x: 0, y: 0, width: 1, height: EditorMetrics.lineHeight)
+    )
+
+    textView.executeMotion(.down(1))
+    let secondRow = textView.normalizedInsertionPointRect(
+      NSRect(x: 0, y: 0, width: 1, height: EditorMetrics.lineHeight)
+    )
+    #expect(secondRow.origin.y > firstRow.origin.y)
+
+    textView.executeMotion(.up(1))
+    let returnedRow = textView.normalizedInsertionPointRect(
+      NSRect(x: 0, y: 0, width: 1, height: EditorMetrics.lineHeight)
+    )
+    #expect(returnedRow.origin.y == firstRow.origin.y)
+  }
+
+  @Test("insertion caret width stays stable across layout-provided widths")
+  func insertionCaretWidthIsStable() {
+    let textView = makeVimMotionTextView(text: "caret width")
+    let narrow = textView.insertionPointDisplayRect(
+      for: NSRect(x: 0, y: 0, width: 0.5, height: EditorMetrics.lineHeight),
+      turnedOn: true
+    )
+    let wide = textView.insertionPointDisplayRect(
+      for: NSRect(x: 0, y: 0, width: 2, height: EditorMetrics.lineHeight),
+      turnedOn: true
+    )
+
+    #expect(narrow.width == wide.width)
+    #expect(narrow.width == 1)
+  }
+
+  @Test("caret stays visible when a move lands during the hidden blink phase")
+  func caretMovementForcesVisibleInsertionPoint() {
+    let textView = makeVimMotionTextView(text: "old caret\nnew caret")
+    textView.setSelectedRange(NSRange(location: 3, length: 0))
+
+    let painted = textView.insertionPointDisplayRect(
+      for: NSRect(x: 30, y: 0, width: 1, height: EditorMetrics.lineHeight),
+      turnedOn: true
+    )
+    let image = NSImage(size: NSSize(width: 240, height: 80))
+    image.lockFocus()
+    defer { image.unlockFocus() }
+    textView.drawInsertionPoint(in: painted, color: .labelColor, turnedOn: true)
+
+    textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+    let moved = NSRect(
+      x: 160,
+      y: EditorMetrics.lineHeight,
+      width: 1,
+      height: EditorMetrics.lineHeight
+    )
+    textView.drawInsertionPoint(in: moved, color: .labelColor, turnedOn: false)
+
+    let visible = textView.insertionPointDisplayRect(for: moved, turnedOn: false)
+    let expected = textView.insertionPointDisplayRect(for: moved, turnedOn: true)
+    #expect(visible == expected)
+  }
+
   @Test("normal mode caret at code block line start uses that line fragment")
   func lineStartCaretRectInsideCodeBlock() {
     let textView = makeVimMotionTextView(text: "before\n```cpp\nint x;\nint y;\n```\nafter")
@@ -155,6 +224,30 @@ struct MultilineEditorVimLogicalLineMotionTests {
     #expect(abs(rect.origin.y - (textView.textContainerOrigin.y + fragment.minY)) < 0.01)
   }
 
+  @Test("Command-Right reaches the end from a line start in Vim insert mode")
+  func commandRightFromLineStartInVimInsertMode() {
+    let textView = makeVimMotionTextView(text: "first line\nsecond line\nthird line")
+    textView.vimModeEnabled = true
+    _ = textView.vimEngine?.handle(key: "i", hasModifiers: false)
+    let lineStart = ("first line\n" as NSString).length
+    textView.setSelectedRange(NSRange(location: lineStart, length: 0))
+
+    pressCommandRight(in: textView)
+
+    #expect(textView.selectedRange.location == ("first line\nsecond line" as NSString).length)
+  }
+
+  @Test("Command-Right reaches the end from a line start without Vim")
+  func commandRightFromLineStartWithoutVim() {
+    let textView = makeVimMotionTextView(text: "first line\nsecond line\nthird line")
+    let lineStart = ("first line\n" as NSString).length
+    textView.setSelectedRange(NSRange(location: lineStart, length: 0))
+
+    pressCommandRight(in: textView)
+
+    #expect(textView.selectedRange.location == ("first line\nsecond line" as NSString).length)
+  }
+
   private func makeVimMotionTextView(
     text: String,
     width: CGFloat = EditorMetrics.panelWidth
@@ -178,4 +271,23 @@ struct MultilineEditorVimLogicalLineMotionTests {
     CodeStyler.apply(to: textView, theme: ThemeCatalog.obsidian)
     return textView
   }
+}
+
+@MainActor
+private func pressCommandRight(in textView: PlaceholderTextView) {
+  guard
+    let event = NSEvent.keyEvent(
+      with: .keyDown,
+      location: .zero,
+      modifierFlags: .command,
+      timestamp: 0,
+      windowNumber: 0,
+      context: nil,
+      characters: "→",
+      charactersIgnoringModifiers: "→",
+      isARepeat: false,
+      keyCode: 124
+    )
+  else { return }
+  textView.keyDown(with: event)
 }

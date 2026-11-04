@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 
 @testable import Spotlight
@@ -155,5 +156,30 @@ struct HUDFrameSolverTests {
     #expect(shortNote.newOriginY == longNote.newOriginY)
     #expect(shortNote.newOriginY == bottom)
     #expect(shortNote.newOriginY + 200 == longNote.newOriginY + 420 - 220)
+  }
+
+  @Test("HUD position persists its exact x and top edge")
+  func hudPositionRoundTrips() throws {
+    let suiteName = "test-hud-position-" + UUID().uuidString
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    let position = HUDPosition(originX: 321.25, topY: 876.5)
+
+    HUDPositionStore.save(position, to: defaults)
+
+    #expect(HUDPositionStore.load(from: defaults) == position)
+  }
+
+  @Test("restored HUD position preserves top edge while clamping to the screen")
+  func restoredHUDPositionClampsToScreen() {
+    let position = HUDPosition(originX: 900, topY: 700)
+    let frame = HUDPositionStore.frame(
+      for: position,
+      size: CGSize(width: 200, height: 300),
+      in: CGRect(x: 0, y: 0, width: 1000, height: 800)
+    )
+
+    #expect(frame.origin.x == 800)
+    #expect(frame.maxY == 700)
+    #expect(frame.height == 300)
   }
 }

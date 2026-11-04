@@ -63,13 +63,17 @@ struct SpotlightRootView: View {
     )
   }
 
-  static let vimBarHeight: CGFloat = 18
+  static let bottomBarHeight: CGFloat = 18
+
+  private var showsBottomBar: Bool {
+    preferences.vimMode || preferences.showWordCount
+  }
 
   private var extraChromeHeight: CGFloat {
     var total: CGFloat = 0
     if find.isVisible { total += EditorMetrics.findBarHeight }
     if preferences.showHints { total += EditorMetrics.tutorialBarHeight }
-    if preferences.vimMode { total += Self.vimBarHeight }
+    if showsBottomBar { total += Self.bottomBarHeight }
     if fuzzy.isVisible {
       total += FuzzyPalette.reservedHeight
     } else if command.isVisible {
@@ -93,9 +97,19 @@ struct SpotlightRootView: View {
       }
       editorCard
         .transaction { $0.animation = nil }
-      if preferences.vimMode {
-        vimModeBar
-          .transaction { $0.animation = nil }
+      if showsBottomBar {
+        EditorBottomBar(
+          vimModeEnabled: preferences.vimMode,
+          showWordCount: preferences.showWordCount,
+          mode: vimController.mode,
+          prompt: vimController.prompt,
+          message: vimController.message,
+          searchStatus: vimController.searchStatus,
+          wordCount: WordCounter.count(in: session.currentText),
+          theme: theme,
+          hasOverlayBelow: hasOverlayBelow
+        )
+        .transaction { $0.animation = nil }
       }
       if fuzzy.isVisible {
         FuzzyPalette(controller: fuzzy, theme: theme) { chat in
@@ -159,7 +173,7 @@ struct SpotlightRootView: View {
   }
 
   private var hasAttachedBottom: Bool {
-    preferences.vimMode || session.navigationPreview != nil
+    showsBottomBar || session.navigationPreview != nil
       || fuzzy.isVisible || command.isVisible
   }
 
@@ -213,7 +227,20 @@ struct SpotlightRootView: View {
     fuzzy.isVisible || command.isVisible || session.navigationPreview != nil
   }
 
-  private var vimBarShape: UnevenRoundedRectangle {
+}
+
+private struct EditorBottomBar: View {
+  let vimModeEnabled: Bool
+  let showWordCount: Bool
+  let mode: VimMode
+  let prompt: VimController.Prompt?
+  let message: VimController.Message?
+  let searchStatus: String?
+  let wordCount: Int
+  let theme: Theme
+  let hasOverlayBelow: Bool
+
+  private var shape: UnevenRoundedRectangle {
     let roundBottom = !hasOverlayBelow
     return UnevenRoundedRectangle(
       topLeadingRadius: 0,
@@ -224,40 +251,59 @@ struct SpotlightRootView: View {
     )
   }
 
-  private var vimModeBar: some View {
+  var body: some View {
     HStack(spacing: 6) {
-      if let prompt = vimController.prompt {
-        VimPromptView(prompt: prompt, theme: theme)
-        Spacer(minLength: 0)
-      } else {
-        Text(label(for: vimController.mode))
-          .font(.system(size: 9, weight: .semibold, design: .monospaced))
-          .foregroundStyle(color(for: vimController.mode))
+      leadingContent
+      if showWordCount {
         Spacer(minLength: 8)
-        if let message = vimController.message {
-          Text(message.text)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
-            .foregroundStyle(messageColor(for: message.kind))
-            .lineLimit(1)
-            .truncationMode(.tail)
-        } else if let status = vimController.searchStatus {
-          Text(status)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
-            .foregroundStyle(theme.text.opacity(0.55))
-            .lineLimit(1)
-        }
+        Text(wordCountLabel)
+          .font(.system(size: 10, weight: .medium, design: .monospaced))
+          .foregroundStyle(theme.text.opacity(0.55))
+          .lineLimit(1)
       }
     }
     .padding(.horizontal, 8)
-    .frame(height: Self.vimBarHeight)
-    .background(vimBarShape.fill(theme.background))
+    .frame(height: SpotlightRootView.bottomBarHeight)
+    .background(shape.fill(theme.background))
     .overlay(alignment: .top) {
       Rectangle()
         .fill(theme.border.opacity(0.6))
         .frame(height: 1)
     }
-    .overlay(vimBarShape.strokeBorder(theme.border, lineWidth: 1))
+    .overlay(shape.strokeBorder(theme.border, lineWidth: 1))
     .padding(.horizontal, EditorMetrics.outerPadding)
+  }
+
+  @ViewBuilder
+  private var leadingContent: some View {
+    if vimModeEnabled {
+      if let prompt {
+        VimPromptView(prompt: prompt, theme: theme)
+      } else {
+        Text(label(for: mode))
+          .font(.system(size: 9, weight: .semibold, design: .monospaced))
+          .foregroundStyle(color(for: mode))
+        Spacer(minLength: 8)
+        if let message {
+          Text(message.text)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(messageColor(for: message.kind))
+            .lineLimit(1)
+            .truncationMode(.tail)
+        } else if let searchStatus {
+          Text(searchStatus)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(theme.text.opacity(0.55))
+            .lineLimit(1)
+        }
+      }
+    } else {
+      Spacer(minLength: 0)
+    }
+  }
+
+  private var wordCountLabel: String {
+    wordCount == 1 ? "1 word" : "\(wordCount) words"
   }
 
   private func label(for mode: VimMode) -> String {

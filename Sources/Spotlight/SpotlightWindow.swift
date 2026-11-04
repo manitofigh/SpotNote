@@ -37,6 +37,7 @@ public final class SpotlightWindowController {
   let preferences: ThemePreferences
   let session: ChatSession
   private let shortcuts: ShortcutStore
+  private let defaults: UserDefaults
   let findController = FindController()
   private let fuzzyController = FuzzyController()
   private let commandController = CommandController()
@@ -53,6 +54,9 @@ public final class SpotlightWindowController {
   /// window was cached in the Dock server), which made the panel appear
   /// to "jump up" the first time it was re-toggled.
   private var pinnedTopY: CGFloat?
+  /// Screen-space X of the panel's intended left edge. Kept alongside the
+  /// top edge so shortcut moves survive both HUD dismissal and relaunch.
+  private var pinnedOriginX: CGFloat?
   /// Three-state machine that drives `setPanelHeight`:
   /// - `.none` -- top-anchored at `pinnedTopY` (the rest position).
   /// - `.pendingFirstResize` -- the navigation overlay just appeared;
@@ -100,6 +104,7 @@ public final class SpotlightWindowController {
   private var editorTopY: CGFloat?
   private var measuredHeightCache: MeasuredHeightCache?
   private var programmaticFrameToIgnore: NSRect?
+  private var isMovingHUD = false
   private var cancellables: Set<AnyCancellable> = []
   private struct FuzzyEditorSnapshot {
     let chatID: UUID?
@@ -122,7 +127,9 @@ public final class SpotlightWindowController {
   /// SwiftUI's panel height before activating.
   private var chromeBelowEditor: CGFloat {
     var height: CGFloat = 0
-    if preferences.vimMode { height += SpotlightRootView.vimBarHeight }
+    if preferences.vimMode || preferences.showWordCount {
+      height += SpotlightRootView.bottomBarHeight
+    }
     if fuzzyController.isVisible {
       height += FuzzyPalette.reservedHeight
     } else if commandController.isVisible {
@@ -160,11 +167,13 @@ public final class SpotlightWindowController {
     preferences: ThemePreferences,
     store: ChatStore,
     shortcuts: ShortcutStore,
-    onOpenSettings: @escaping () -> Void
+    onOpenSettings: @escaping () -> Void,
+    defaults: UserDefaults = .standard
   ) {
     self.preferences = preferences
     self.session = ChatSession(store: store)
     self.shortcuts = shortcuts
+    self.defaults = defaults
     self.onOpenSettings = onOpenSettings
     FontLoader.registerBundledFonts()
     observeActiveApp()
@@ -361,6 +370,7 @@ public final class SpotlightWindowController {
   public func close() {
     if fuzzyController.isVisible { fuzzyController.close() }
     fuzzyPreviewPanel?.orderOut(nil)
+    if let panel, panel.isVisible { persistHUDPosition(of: panel) }
     panel?.orderOut(nil)
     // If a bona-fide SpotNote window (Settings) is visible, leave the
     // app active so the user can keep working there. Filter to
@@ -409,18 +419,22 @@ public final class SpotlightWindowController {
     guard let screen = NSScreen.main else { return }
     let screenFrame = screen.visibleFrame
     let height = expectedPanelHeight
-    let top: CGFloat
-    if let cached = pinnedTopY {
-      top = cached
-    } else {
-      top = (screenFrame.midY + screenFrame.height * 0.18 + height / 2).rounded()
-      pinnedTopY = top
-    }
-    let x = (screenFrame.midX - panel.frame.width / 2).rounded()
-    setPanelFrame(
-      NSRect(x: x, y: top - height, width: panel.frame.width, height: height),
-      display: false
+    let stored = HUDPositionStore.load(from: defaults)
+    let fallbackTop = (screenFrame.midY + screenFrame.height * 0.18 + height / 2).rounded()
+    let desired = HUDPosition(
+      originX: pinnedOriginX
+        ?? stored?.originX
+        ?? (screenFrame.midX - panel.frame.width / 2).rounded(),
+      topY: pinnedTopY ?? stored?.topY ?? fallbackTop
     )
+    let resolved = HUDPositionStore.frame(
+      for: desired,
+      size: CGSize(width: panel.frame.width, height: height),
+      in: screenFrame
+    )
+    pinnedOriginX = resolved.minX
+    pinnedTopY = resolved.maxY
+    setPanelFrame(resolved, display: false)
   }
 
   private func makePanel() -> SpotlightPanel {
@@ -511,20 +525,26 @@ public final class SpotlightWindowController {
   private func pinnedOrigin(for panel: NSPanel) -> NSPoint? {
     guard let screen = NSScreen.main else { return nil }
     let screenFrame = screen.visibleFrame
-    let top: CGFloat
-    if let cached = pinnedTopY {
-      top = cached
-    } else {
-      let initialHeight = EditorMetrics.panelHeight(
-        forLines: 1,
-        maxLines: preferences.maxVisibleLines
-      )
-      top = (screenFrame.midY + screenFrame.height * 0.18 + initialHeight / 2).rounded()
-      pinnedTopY = top
-    }
-    let x = (screenFrame.midX - panel.frame.width / 2).rounded()
-    let y = top - panel.frame.height
-    return NSPoint(x: x, y: y)
+    let stored = HUDPositionStore.load(from: defaults)
+    let initialHeight = EditorMetrics.panelHeight(
+      forLines: 1,
+      maxLines: preferences.maxVisibleLines
+    )
+    let fallbackTop = (screenFrame.midY + screenFrame.height * 0.18 + initialHeight / 2).rounded()
+    let desired = HUDPosition(
+      originX: pinnedOriginX
+        ?? stored?.originX
+        ?? (screenFrame.midX - panel.frame.width / 2).rounded(),
+      topY: pinnedTopY ?? stored?.topY ?? fallbackTop
+    )
+    let resolved = HUDPositionStore.frame(
+      for: desired,
+      size: panel.frame.size,
+      in: screenFrame
+    )
+    pinnedOriginX = resolved.minX
+    pinnedTopY = resolved.maxY
+    return resolved.origin
   }
 
   private func correctDriftIfNeeded(_ panel: NSPanel) {
@@ -613,6 +633,7 @@ extension SpotlightWindowController {
       ) { [weak self, weak panel] _ in
         MainActor.assumeIsolated {
           guard let self else { return }
+          if self.isMovingHUD { return }
           if self.preferences.dimOnFocusLoss {
             panel?.animator().alphaValue = CGFloat(self.preferences.unfocusedOpacity)
           } else {
@@ -643,8 +664,10 @@ extension SpotlightWindowController {
           guard let self, let panel else { return }
           if self.shouldIgnoreProgrammaticMove(panel.frame) { return }
           let newTop = panel.frame.origin.y + panel.frame.size.height
+          self.pinnedOriginX = panel.frame.origin.x
           self.pinnedTopY = newTop
           self.editorTopY = newTop - self.chromeAboveEditor
+          self.persistHUDPosition(of: panel)
           self.syncFuzzyPreviewPanel()
         }
       }
@@ -734,9 +757,20 @@ extension SpotlightWindowController {
       }
       return false
     }
+    if isHUDMove(action) {
+      dispatch(action)
+      return true
+    }
     if action == .newChat || action == .deleteChat, event.isARepeat { return true }
     Task { @MainActor [weak self] in self?.dispatch(action) }
     return true
+  }
+
+  private func isHUDMove(_ action: ShortcutAction) -> Bool {
+    switch action {
+    case .moveHUDLeft, .moveHUDRight, .moveHUDDown, .moveHUDUp: return true
+    default: return false
+    }
   }
 
   private func openSelectedFuzzyResult() {
@@ -845,6 +879,8 @@ extension SpotlightWindowController {
 
   private func moveHUD(_ action: ShortcutAction) {
     guard let panel else { return }
+    isMovingHUD = true
+    defer { isMovingHUD = false }
     let step = Self.hudMoveStep
     var frame = panel.frame
     switch action {
@@ -861,9 +897,20 @@ extension SpotlightWindowController {
     }
     frame.origin.x = frame.origin.x.rounded()
     frame.origin.y = frame.origin.y.rounded()
+    pinnedOriginX = frame.origin.x
     pinnedTopY = frame.maxY
     editorTopY = frame.maxY - chromeAboveEditor
-    setPanelFrame(frame, display: true, animate: true)
+    setPanelFrame(frame, display: true)
+    persistHUDPosition(of: panel)
+    panel.alphaValue = 1.0
+    bringPanelToFront(panel)
+  }
+
+  private func persistHUDPosition(of panel: NSPanel) {
+    let position = HUDPosition(originX: panel.frame.minX, topY: panel.frame.maxY)
+    pinnedOriginX = position.originX
+    pinnedTopY = position.topY
+    HUDPositionStore.save(position, to: defaults)
   }
 
   private func editorTextView() -> PlaceholderTextView? {

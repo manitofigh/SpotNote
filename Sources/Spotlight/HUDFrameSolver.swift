@@ -1,5 +1,6 @@
 // swiftlint:disable function_parameter_count
 import CoreGraphics
+import Foundation
 
 /// Pure HUD-resize math, factored out of `SpotlightWindowController` so
 /// the two anchoring policies (top-anchored at rest, bottom-pinned
@@ -74,5 +75,55 @@ enum HUDFrameSolver {
       let newY = panelTop - newHeight
       return (newY, editorTop)
     }
+  }
+}
+
+/// Persisted screen position for the HUD. The top edge is stored instead of
+/// the origin Y so a note with a different height reopens at the same visual
+/// location.
+struct HUDPosition: Equatable {
+  let originX: CGFloat
+  let topY: CGFloat
+}
+
+enum HUDPositionStore {
+  static let defaultsKey = "hud.position"
+
+  static func load(from defaults: UserDefaults) -> HUDPosition? {
+    guard let values = defaults.dictionary(forKey: defaultsKey),
+      let originX = (values["originX"] as? NSNumber)?.doubleValue,
+      let topY = (values["topY"] as? NSNumber)?.doubleValue
+    else {
+      return nil
+    }
+    return HUDPosition(originX: originX, topY: topY)
+  }
+
+  static func save(_ position: HUDPosition, to defaults: UserDefaults) {
+    defaults.set(
+      [
+        "originX": Double(position.originX),
+        "topY": Double(position.topY)
+      ],
+      forKey: defaultsKey
+    )
+  }
+
+  static func frame(
+    for position: HUDPosition,
+    size: CGSize,
+    in visibleFrame: CGRect
+  ) -> CGRect {
+    let maxOriginX = max(visibleFrame.minX, visibleFrame.maxX - size.width)
+    let maxOriginY = max(visibleFrame.minY, visibleFrame.maxY - size.height)
+    let originX = min(max(position.originX, visibleFrame.minX), maxOriginX)
+    let desiredOriginY = position.topY - size.height
+    let originY = min(max(desiredOriginY, visibleFrame.minY), maxOriginY)
+    return CGRect(
+      x: originX,
+      y: originY,
+      width: size.width,
+      height: size.height
+    )
   }
 }

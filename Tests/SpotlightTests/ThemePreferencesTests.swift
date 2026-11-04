@@ -152,6 +152,22 @@ struct ThemePreferencesTests {
     #expect(rehydrated.showHints == false)
   }
 
+  @Test("showWordCount defaults off on first launch")
+  func wordCountDefaultsOff() {
+    let prefs = ThemePreferences(defaults: makeDefaults())
+    #expect(prefs.showWordCount == false)
+  }
+
+  @Test("showWordCount persists to UserDefaults, including the on value")
+  func wordCountPersists() {
+    let defaults = makeDefaults()
+    let prefs = ThemePreferences(defaults: defaults)
+    prefs.showWordCount = true
+    #expect(defaults.bool(forKey: "editor.showWordCount") == true)
+    let rehydrated = ThemePreferences(defaults: defaults)
+    #expect(rehydrated.showWordCount == true)
+  }
+
   @Test("dimBackgroundWhileFocused defaults off and persists")
   func dimBackgroundWhileFocusedPersists() {
     let defaults = makeDefaults()

@@ -187,6 +187,7 @@ final class CommandController: ObservableObject {
       ("Max visible lines", "Panel grows up to this many rows before scrolling.", "maxVisibleLines"),
       ("Hints bar", "Show the keyboard shortcut hint strip above the editor.", "hintsBar"),
       ("Vim mode", "Use vim-style keybindings for modal editing.", "vimMode"),
+      ("Word count", "Show the current note's word count in the bottom bar.", "wordCount"),
       ("Dim instead of hide", "Keep HUD visible at reduced opacity on focus loss.", "dimOnFocusLoss"),
       ("Unfocused opacity", "How transparent the HUD becomes when unfocused.", "unfocusedOpacity"),
       (

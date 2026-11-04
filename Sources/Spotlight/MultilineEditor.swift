@@ -655,6 +655,15 @@ final class PlaceholderTextView: NSTextView {
   private var lastInsertionPointDisplayRect: NSRect?
   private var isPasting = false
   private var suppressedOccurrences: [SuppressedTokenOccurrence] = []
+  /// Keep the insertion point visible briefly after navigation so a move
+  /// that lands during AppKit's hidden blink phase is still easy to follow.
+  private static let caretRevealDuration: TimeInterval = 0.45
+  private var caretVisibleUntil: TimeInterval = 0
+  private var caretRevealTimer: Timer?
+  /// AppKit can provide different insertion-point widths at different
+  /// glyphs. Keep the editor caret visually consistent instead of allowing
+  /// those layout-dependent widths to leak into the renderer.
+  private let insertionPointWidth: CGFloat = 1
 
   var vimModeEnabled: Bool = false {
     didSet {
@@ -706,7 +715,7 @@ final class PlaceholderTextView: NSTextView {
     if commitNavigationSelectionIfNeeded(event: event, mods: mods) {
       return
     }
-    if handleControlDeletion(mods: mods, chars: chars) { return }
+    if handlePreVimNavigation(event: event, mods: mods, chars: chars) { return }
     if let engine = vimEngine {
       if !handleVimKey(event: event, engine: engine, mods: mods, chars: chars) {
         super.keyDown(with: event)
@@ -722,6 +731,43 @@ final class PlaceholderTextView: NSTextView {
       return
     }
     super.keyDown(with: event)
+  }
+
+  private func handlePreVimNavigation(
+    event: NSEvent,
+    mods: NSEvent.ModifierFlags,
+    chars: String
+  ) -> Bool {
+    if handleControlDeletion(mods: mods, chars: chars) { return true }
+    return handleCommandArrowMovement(event: event, mods: mods)
+  }
+
+  private func handleCommandArrowMovement(
+    event: NSEvent,
+    mods: NSEvent.ModifierFlags
+  ) -> Bool {
+    let nonShiftMods = mods.subtracting(.shift)
+    guard nonShiftMods == .command else { return false }
+    guard vimEngine == nil || vimEngine?.mode == .insert else { return false }
+
+    switch event.keyCode {
+    case 123:
+      if mods.contains(.shift) {
+        moveToBeginningOfLineAndModifySelection(self)
+      } else {
+        moveToBeginningOfLine(self)
+      }
+    case 124:
+      if mods.contains(.shift) {
+        moveToEndOfLineAndModifySelection(self)
+      } else {
+        moveToEndOfLine(self)
+      }
+    default:
+      return false
+    }
+    revealCaret()
+    return true
   }
 
   private func revertRenderedTokenIfNeeded(
@@ -864,7 +910,7 @@ final class PlaceholderTextView: NSTextView {
   func executeMotion(_ motion: Motion) {
     defer { revealCaret() }
     if let delta = logicalLineDelta(for: motion) {
-      moveByLogicalLines(delta)
+      moveByVisualLines(delta)
       return
     }
     if let (selector, count) = repeatedMotion(motion) {
@@ -906,55 +952,14 @@ final class PlaceholderTextView: NSTextView {
     return nil
   }
 
-  private func moveByLogicalLines(_ delta: Int) {
+  /// Uses NSTextView's native vertical movement so Vim `j`/`k` follows the
+  /// same rendered rows as arrow keys in insert mode, including soft wraps.
+  private func moveByVisualLines(_ delta: Int) {
     guard delta != 0 else { return }
-    let nsString = string as NSString
-    guard nsString.length > 0 else { return }
-    let lines = logicalLineRanges(in: nsString)
-    guard !lines.isEmpty else { return }
-    let cursor = min(selectedRange.location, nsString.length)
-    let currentIndex = logicalLineIndex(containing: cursor, in: lines)
-    let currentLine = lines[currentIndex]
-    let column = max(0, cursor - currentLine.location)
-    let targetIndex = min(max(0, currentIndex + delta), lines.count - 1)
-    let targetLine = lines[targetIndex]
-    let targetEnd = lineContentEnd(targetLine, in: nsString)
-    setInsertionPoint(min(targetLine.location + column, targetEnd))
-  }
-
-  private func logicalLineRanges(in nsString: NSString) -> [NSRange] {
-    var ranges: [NSRange] = []
-    var location = 0
-    while location < nsString.length {
-      let range = nsString.lineRange(for: NSRange(location: location, length: 0))
-      ranges.append(range)
-      let next = range.location + range.length
-      guard next > location else { break }
-      location = next
+    let movement = delta > 0 ? moveDown(_:) : moveUp(_:)
+    for _ in 0..<abs(delta) {
+      movement(nil)
     }
-    if nsString.length > 0, nsString.character(at: nsString.length - 1) == 0x0A {
-      ranges.append(NSRange(location: nsString.length, length: 0))
-    }
-    return ranges
-  }
-
-  private func logicalLineIndex(containing cursor: Int, in lines: [NSRange]) -> Int {
-    for (index, line) in lines.enumerated() {
-      if cursor >= line.location, cursor < line.location + line.length {
-        return index
-      }
-    }
-    return max(0, lines.count - 1)
-  }
-
-  private func lineContentEnd(_ line: NSRange, in nsString: NSString) -> Int {
-    var end = line.location + line.length
-    while end > line.location {
-      let ch = nsString.character(at: end - 1)
-      guard ch == 0x0A || ch == 0x0D else { break }
-      end -= 1
-    }
-    return end
   }
 
   func executeDeleteMotion(_ motion: Motion) {
@@ -1077,7 +1082,8 @@ final class PlaceholderTextView: NSTextView {
   /// layout manager centers glyphs inside that fragment, so the caret uses
   /// the same vertical inset.
   override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
-    let displayRect = insertionPointDisplayRect(for: rect, turnedOn: flag)
+    let caretShouldBeVisible = flag || isCaretRevealActive
+    let displayRect = insertionPointDisplayRect(for: rect, turnedOn: caretShouldBeVisible)
     if vimEngine?.mode == .normal {
       let blockWidth = max(displayRect.width, 8)
       let blockRect = NSRect(
@@ -1086,7 +1092,7 @@ final class PlaceholderTextView: NSTextView {
         width: blockWidth,
         height: displayRect.height
       )
-      guard flag else {
+      guard caretShouldBeVisible else {
         invalidateInsertionPointRect(blockRect)
         return
       }
@@ -1094,8 +1100,8 @@ final class PlaceholderTextView: NSTextView {
       color.withAlphaComponent(0.4).setFill()
       blockRect.fill()
     } else {
-      super.drawInsertionPoint(in: displayRect, color: color, turnedOn: flag)
-      if flag {
+      super.drawInsertionPoint(in: displayRect, color: color, turnedOn: caretShouldBeVisible)
+      if caretShouldBeVisible {
         lastInsertionPointDisplayRect = displayRect
       } else {
         invalidateInsertionPointRect(displayRect)
@@ -1115,12 +1121,21 @@ final class PlaceholderTextView: NSTextView {
     let caretFont = font ?? .systemFont(ofSize: 14)
     let fontHeight = caretFont.ascender - caretFont.descender
     let centeredGlyphInset = max(0, rect.height - fontHeight) / 2
-    return NSRect(
+    let normalized = NSRect(
       x: rect.origin.x,
       y: rect.origin.y + centeredGlyphInset,
-      width: rect.width,
+      width: insertionPointWidth,
       height: fontHeight
     )
+    return pixelAlignInsertionPoint(normalized)
+  }
+
+  private func pixelAlignInsertionPoint(_ rect: NSRect) -> NSRect {
+    let scale = max(window?.backingScaleFactor ?? layer?.contentsScale ?? 1, 1)
+    var aligned = rect
+    aligned.origin.x = round(rect.origin.x * scale) / scale
+    aligned.origin.y = round(rect.origin.y * scale) / scale
+    return aligned
   }
 
   private func invalidateInsertionPointRect(_ rect: NSRect) {
@@ -1132,12 +1147,20 @@ final class PlaceholderTextView: NSTextView {
   }
 
   func normalizedInsertionPointRect(_ rect: NSRect) -> NSRect {
-    editorCaretRect(
+    if let caret = editorCaretRect(
       in: self,
       cursor: selectedRange.location,
-      width: rect.width,
+      width: insertionPointWidth,
       fallbackHeight: EditorMetrics.lineHeight
-    ) ?? rect
+    ) {
+      return caret
+    }
+    return NSRect(
+      x: rect.origin.x,
+      y: rect.origin.y,
+      width: insertionPointWidth,
+      height: rect.height
+    )
   }
 
   override func setNeedsDisplay(_ invalidRect: NSRect) {
@@ -1146,6 +1169,42 @@ final class PlaceholderTextView: NSTextView {
     if let lastInsertionPointDisplayRect {
       super.setNeedsDisplay(lastInsertionPointDisplayRect.insetBy(dx: dx, dy: -2))
     }
+  }
+
+  override func setSelectedRange(_ charRange: NSRange) {
+    super.setSelectedRange(charRange)
+    revealCaretAfterMovementIfNeeded(for: charRange)
+  }
+
+  override func setSelectedRange(
+    _ charRange: NSRange,
+    affinity: NSSelectionAffinity,
+    stillSelecting flag: Bool
+  ) {
+    super.setSelectedRange(charRange, affinity: affinity, stillSelecting: flag)
+    revealCaretAfterMovementIfNeeded(for: charRange)
+  }
+
+  private var isCaretRevealActive: Bool {
+    ProcessInfo.processInfo.systemUptime < caretVisibleUntil
+  }
+
+  private func revealCaretAfterMovementIfNeeded(for range: NSRange) {
+    guard range.length == 0 else { return }
+    caretVisibleUntil = ProcessInfo.processInfo.systemUptime + Self.caretRevealDuration
+    caretRevealTimer?.invalidate()
+    caretRevealTimer = Timer.scheduledTimer(
+      withTimeInterval: Self.caretRevealDuration,
+      repeats: false
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.caretRevealTimer = nil
+        self.caretVisibleUntil = 0
+        self.updateInsertionPointStateAndRestartTimer(true)
+      }
+    }
+    updateInsertionPointStateAndRestartTimer(true)
   }
 
   @objc func insertTodayBadgeToken(_ sender: Any?) {

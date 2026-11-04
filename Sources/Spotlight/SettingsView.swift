@@ -382,6 +382,17 @@ private struct EditorPane: View {
         SettingsDivider()
 
         SettingsToggleRow(
+          title: "Word count",
+          subtitle: "Show the current note's word count in the bottom bar.",
+          isOn: Binding(
+            get: { preferences.showWordCount },
+            set: { preferences.showWordCount = $0 }
+          )
+        )
+
+        SettingsDivider()
+
+        SettingsToggleRow(
           title: "Line numbers",
           subtitle: "Show line numbers on the left side of the editor.",
           isOn: Binding(

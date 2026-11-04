@@ -16,6 +16,7 @@ public final class ThemePreferences: ObservableObject {
     static let maxVisibleLines = "editor.maxVisibleLines"
     static let showHints = "hud.showTutorial"
     static let vimMode = "editor.vimMode"
+    static let showWordCount = "editor.showWordCount"
     static let dimOnFocusLoss = "hud.dimOnFocusLoss"
     static let unfocusedOpacity = "hud.unfocusedOpacity"
     static let dimBackgroundWhileFocused = "hud.dimBackgroundWhileFocused"
@@ -42,6 +43,10 @@ public final class ThemePreferences: ObservableObject {
 
   @Published public var vimMode: Bool {
     didSet { defaults.set(vimMode, forKey: Key.vimMode) }
+  }
+
+  @Published public var showWordCount: Bool {
+    didSet { defaults.set(showWordCount, forKey: Key.showWordCount) }
   }
 
   @Published public var showDockIcon: Bool {
@@ -121,6 +126,7 @@ public final class ThemePreferences: ObservableObject {
     self.showMenuBarIcon = Self.boolOrDefault(defaults, Key.showMenuBarIcon, default: true)
     self.showHints = Self.boolOrDefault(defaults, Key.showHints, default: true)
     self.vimMode = Self.boolOrDefault(defaults, Key.vimMode, default: false)
+    self.showWordCount = Self.boolOrDefault(defaults, Key.showWordCount, default: false)
     self.showDockIcon = Self.boolOrDefault(defaults, Key.showDockIcon, default: false)
     self.launchAtLogin = LaunchAtLogin.isEnabled
     let storedStyle = defaults.string(forKey: Key.dockIconStyle) ?? DockIconStyle.dark.rawValue
