@@ -244,8 +244,14 @@ cat > "$RELEASE_NOTES_PATH" <<HTML
   <p>Published $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
   <h2>What’s new</h2>
   <ul>
-    <li>New: word counter (disabled by default; enable it in Settings &gt; Editor).</li>
-    <li>Improved: the caret stays visible while navigating for easier tracking.</li>
+    <li>New: nested checklists. Return continues a list, Tab / Shift-Tab indent, Backspace removes an empty box, and parents check themselves when all their sub-items are done.</li>
+    <li>New: Settings &gt; Editor has a panel width slider and a “Wrap long lines” toggle (turn it off to scroll long lines horizontally).</li>
+    <li>New: Vim <code>ciw</code> / <code>diw</code> / <code>yiw</code> (and <code>aw</code>), <code>yy</code>, <code>p</code> / <code>P</code>; <code>cw</code> now enters insert mode.</li>
+    <li>Fixed: Return in ⌘P search now opens the result you moved to with ⌃N / ⌃P.</li>
+    <li>Fixed: text no longer flickers between two rows near the end of a line with an external display or mouse attached.</li>
+    <li>Fixed: copying and pasting checklists keeps every level rendered, and selected checkboxes no longer show a second square.</li>
+    <li>Fixed: the last edits before quitting are always saved, and the append-to-note shortcut opens the most recently edited note.</li>
+    <li>Fixed: shortcuts recorded with ⇧ and punctuation (e.g. ⌘⇧.) work again, and several smaller math, search and import issues.</li>
   </ul>
 </body>
 </html>
