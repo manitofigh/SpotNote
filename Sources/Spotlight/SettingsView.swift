@@ -414,6 +414,31 @@ private struct EditorPane: View {
           step: 1,
           displayValue: "\(preferences.maxVisibleLines)"
         )
+
+        SettingsDivider()
+
+        SettingsSliderRow(
+          title: "Panel width",
+          subtitle: "Width of the SpotNote panel in points.",
+          value: Binding(
+            get: { Double(preferences.panelWidth) },
+            set: { preferences.panelWidth = Int(($0 / 10).rounded()) * 10 }
+          ),
+          range: Double(ThemePreferences.minPanelWidth)...Double(ThemePreferences.maxPanelWidth),
+          step: 10,
+          displayValue: "\(preferences.panelWidth)"
+        )
+
+        SettingsDivider()
+
+        SettingsToggleRow(
+          title: "Wrap long lines",
+          subtitle: "Turn off to keep each line on one row and scroll horizontally.",
+          isOn: Binding(
+            get: { preferences.wrapLines },
+            set: { preferences.wrapLines = $0 }
+          )
+        )
       }
     }
   }

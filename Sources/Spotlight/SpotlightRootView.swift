@@ -105,7 +105,7 @@ struct SpotlightRootView: View {
           prompt: vimController.prompt,
           message: vimController.message,
           searchStatus: vimController.searchStatus,
-          wordCount: WordCounter.count(in: session.currentText),
+          wordCount: preferences.showWordCount ? WordCounter.count(in: session.currentText) : 0,
           theme: theme,
           hasOverlayBelow: hasOverlayBelow
         )
@@ -201,6 +201,7 @@ struct SpotlightRootView: View {
       extraChromeHeight: extraChromeHeight,
       findHighlight: find.currentMatch,
       vimModeEnabled: preferences.vimMode,
+      wrapLines: preferences.wrapLines,
       vimController: vimController,
       onEscape: onEscape,
       onCommitNavigationSelection: session.commitNavigationSelection,

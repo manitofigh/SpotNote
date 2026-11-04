@@ -21,6 +21,12 @@ enum Motion: Equatable, Sendable {
   case documentEnd
 }
 
+/// Vim text objects (`iw` / `aw`) usable after an operator (`c`, `d`, `y`).
+enum TextObject: Equatable, Sendable {
+  case innerWord
+  case aroundWord
+}
+
 enum VimAction: Equatable, Sendable {
   case none
   case switchToInsert
@@ -47,6 +53,13 @@ enum VimAction: Equatable, Sendable {
   case yankVisualLine
   case deleteVisualLineSelection
   case changeVisualLineSelection
+  case changeMotion(Motion)
+  case deleteTextObject(TextObject)
+  case changeTextObject(TextObject)
+  case yankTextObject(TextObject)
+  case yankLine(count: Int)
+  /// `p` (after: true) / `P` (after: false).
+  case paste(after: Bool, count: Int)
 }
 
 final class VimEngine {
@@ -97,36 +110,65 @@ final class VimEngine {
     return handleSingle(key: key)
   }
 
+  // swiftlint:disable:next cyclomatic_complexity
   private func handlePending(key: String) -> VimAction {
     let count = resolvedCount
     defer { clearAccumulator() }
 
-    switch pendingBuffer {
+    let buffered = pendingBuffer
+    pendingBuffer = ""
+    switch buffered {
     case "d":
-      pendingBuffer = ""
       if key == "d" { return .deleteLine(count: count) }
+      if key == "i" || key == "a" { return awaitTextObject(operator: "d", scope: key) }
       if let motion = motionForKey(key, count: count) { return .delete(motion) }
       return .none
     case "c":
-      pendingBuffer = ""
       if key == "c" {
         mode = .insert
         return .deleteLineInsert(count: count)
       }
-      if let motion = motionForKey(key, count: count) { return .delete(motion) }
+      if key == "i" || key == "a" { return awaitTextObject(operator: "c", scope: key) }
+      if let motion = motionForKey(key, count: count) {
+        mode = .insert
+        return .changeMotion(motion)
+      }
+      return .none
+    case "y":
+      if key == "y" { return .yankLine(count: count) }
+      if key == "i" || key == "a" { return awaitTextObject(operator: "y", scope: key) }
       return .none
     case "g":
-      pendingBuffer = ""
       if key == "g" { return .moveCursor(.documentStart) }
       return .none
     default:
-      pendingBuffer = ""
+      if buffered.count == 2 { return resolveTextObject(buffered, key: key) }
       return .none
     }
   }
 
+  /// Keeps `c`/`d`/`y` + `i`/`a` pending until the object key arrives.
+  private func awaitTextObject(operator op: String, scope: String) -> VimAction {
+    pendingBuffer = op + scope
+    return .none
+  }
+
+  private func resolveTextObject(_ buffered: String, key: String) -> VimAction {
+    guard key == "w" || key == "W" else { return .none }
+    let object: TextObject = buffered.hasSuffix("i") ? .innerWord : .aroundWord
+    switch buffered.first {
+    case "c":
+      mode = .insert
+      return .changeTextObject(object)
+    case "d": return .deleteTextObject(object)
+    case "y": return .yankTextObject(object)
+    default: return .none
+    }
+  }
+
+  // swiftlint:disable:next cyclomatic_complexity
   private func handleSingle(key: String) -> VimAction {
-    if key == "d" || key == "g" || key == "c" {
+    if key == "d" || key == "g" || key == "c" || key == "y" {
       pendingBuffer = key
       return .none
     }
@@ -154,6 +196,8 @@ final class VimEngine {
       mode = .insert
       return .composite([.deleteToEndOfLine, .switchToInsert])
     case "u": return .undo(count: count)
+    case "p": return .paste(after: true, count: count)
+    case "P": return .paste(after: false, count: count)
     case "V":
       mode = .visualLine
       return .enterVisualLine
@@ -284,4 +328,70 @@ final class VimEngine {
   private func clearAccumulator() {
     countAccumulator = 0
   }
+}
+
+/// Pure range math for vim text objects, kept free of AppKit so it can be
+/// unit tested. Works in UTF-16 offsets to match `NSTextView`.
+enum VimTextObjects {
+  private enum CharClass: Equatable {
+    case newline
+    case blank
+    case keyword
+    case punctuation
+  }
+
+  private static func charClass(_ unit: unichar) -> CharClass {
+    if unit == 0x0A || unit == 0x0D { return .newline }
+    if unit == 0x20 || unit == 0x09 { return .blank }
+    if unit == 0x5F { return .keyword }  // underscore
+    guard let scalar = UnicodeScalar(unit) else { return .keyword }  // surrogate halves
+    if CharacterSet.alphanumerics.contains(scalar) { return .keyword }
+    if CharacterSet.whitespaces.contains(scalar) { return .blank }
+    return .punctuation
+  }
+
+  // swiftlint:disable cyclomatic_complexity
+  /// Range of the text object under `cursor`, or `nil` when the cursor sits
+  /// on a newline / empty line (vim treats `ciw` there as a no-op change).
+  static func range(of object: TextObject, in text: NSString, at cursor: Int) -> NSRange? {
+    let length = text.length
+    guard length > 0 else { return nil }
+    var position = min(max(0, cursor), length - 1)
+    // The normal-mode caret can rest on a line's newline (after `$` or
+    // Esc); act on the word just before it, like vim's last column.
+    // swiftlint:disable opening_brace
+    if charClass(text.character(at: position)) == .newline, position > 0,
+      charClass(text.character(at: position - 1)) != .newline
+    {
+      // swiftlint:enable opening_brace
+      position -= 1
+    }
+    let cls = charClass(text.character(at: position))
+    guard cls != .newline else { return nil }
+    var start = position
+    while start > 0, charClass(text.character(at: start - 1)) == cls { start -= 1 }
+    var end = position + 1
+    while end < length, charClass(text.character(at: end)) == cls { end += 1 }
+    guard object == .aroundWord else {
+      return NSRange(location: start, length: end - start)
+    }
+    if cls == .blank {
+      // `aw` on whitespace: the blanks plus the following word.
+      if end < length {
+        let next = charClass(text.character(at: end))
+        if next == .keyword || next == .punctuation {
+          while end < length, charClass(text.character(at: end)) == next { end += 1 }
+        }
+      }
+      return NSRange(location: start, length: end - start)
+    }
+    let wordEnd = end
+    while end < length, charClass(text.character(at: end)) == .blank { end += 1 }
+    if end == wordEnd {
+      // No trailing blanks -- take the leading ones instead.
+      while start > 0, charClass(text.character(at: start - 1)) == .blank { start -= 1 }
+    }
+    return NSRange(location: start, length: end - start)
+  }
+  // swiftlint:enable cyclomatic_complexity
 }

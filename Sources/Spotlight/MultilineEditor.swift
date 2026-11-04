@@ -36,6 +36,10 @@ struct MultilineEditor: NSViewRepresentable {
   /// current match. `nil` leaves the user's selection / cursor alone.
   var findHighlight: NSRange?
   var vimModeEnabled: Bool = false
+  /// When `false`, long lines extend past the right edge and the editor
+  /// scrolls horizontally (overlay scroller, fades when idle) instead of
+  /// soft-wrapping.
+  var wrapLines: Bool = true
   /// Owning controller used to mirror normal/insert mode into SwiftUI
   /// state, drive the `:` / `/` prompt buffer, and dispatch parsed
   /// commands. `nil` while vim mode is off (the editor short-circuits
@@ -64,6 +68,7 @@ struct MultilineEditor: NSViewRepresentable {
     textView.placeholderString = placeholder
     refreshAttributes(on: textView)
     configureRuler(scroll: scroll, textView: textView, visible: showLineNumbers)
+    applyWrapMode(scroll: scroll, textView: textView)
     installSuggestionField(on: textView)
     textView.vimModeEnabled = vimModeEnabled
     textView.attachVimController(vimController)
@@ -73,7 +78,7 @@ struct MultilineEditor: NSViewRepresentable {
   }
 
   private func makeScrollView() -> NSScrollView {
-    let scroll = NSScrollView()
+    let scroll = OverlayScrollView()
     scroll.drawsBackground = false
     scroll.borderType = .noBorder
     scroll.hasVerticalScroller = true
@@ -137,6 +142,7 @@ struct MultilineEditor: NSViewRepresentable {
     applyStyle(textView: textView)
     textView.placeholderString = placeholder
     configureRuler(scroll: scroll, textView: textView, visible: showLineNumbers)
+    applyWrapMode(scroll: scroll, textView: textView)
 
     if context.coordinator.lastFocusRequest != focusRequest {
       context.coordinator.lastFocusRequest = focusRequest
@@ -403,6 +409,48 @@ struct MultilineEditor: NSViewRepresentable {
     CodeStyler.apply(to: textView, theme: theme)
   }
 
+  /// Switches between soft-wrapping (container tracks the view width) and
+  /// no-wrap (unbounded container + horizontal overlay scroller). The
+  /// scroller is overlay-style, so it never changes the HUD's height.
+  private func applyWrapMode(scroll: NSScrollView, textView: PlaceholderTextView) {
+    guard let container = textView.textContainer else { return }
+    let unbounded = CGFloat.greatestFiniteMagnitude
+    guard textView.wrapsLines != wrapLines || scroll.hasHorizontalScroller == wrapLines else { return }
+    textView.wrapsLines = wrapLines
+    if wrapLines {
+      scroll.hasHorizontalScroller = false
+      textView.isHorizontallyResizable = false
+      container.widthTracksTextView = true
+      textView.maxSize = NSSize(width: unbounded, height: unbounded)
+      let width = scroll.contentSize.width
+      if width > 0 {
+        textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+        container.size = NSSize(
+          width: max(0, width - textView.textContainerInset.width * 2),
+          height: unbounded
+        )
+      }
+      scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.origin.y))
+    } else {
+      scroll.hasHorizontalScroller = true
+      container.widthTracksTextView = false
+      container.size = NSSize(width: unbounded, height: unbounded)
+      textView.isHorizontallyResizable = true
+      textView.maxSize = NSSize(width: unbounded, height: unbounded)
+      textView.minSize = NSSize(width: scroll.contentSize.width, height: textView.minSize.height)
+      container.exclusionPaths = []
+      textView.sizeToFit()
+    }
+    if let layoutManager = textView.layoutManager {
+      layoutManager.invalidateLayout(
+        forCharacterRange: NSRange(location: 0, length: (textView.string as NSString).length),
+        actualCharacterRange: nil
+      )
+      layoutManager.ensureLayout(for: container)
+    }
+    scroll.reflectScrolledClipView(scroll.contentView)
+  }
+
   private func configureRuler(scroll: NSScrollView, textView: NSTextView, visible: Bool) {
     if visible {
       if !(scroll.verticalRulerView is LineNumberRuler) {
@@ -636,6 +684,9 @@ final class PlaceholderTextView: NSTextView {
   var checkboxUncheckedColor: NSColor = .secondaryLabelColor.withAlphaComponent(0.6)
 
   var copyButtonClearance: CGFloat = 0
+  /// Mirrors `MultilineEditor.wrapLines`. The copy-button exclusion only
+  /// applies while wrapping; in no-wrap mode the container is unbounded.
+  var wrapsLines: Bool = true
   /// Caret position captured when entering visual line mode. The
   /// rendered selection always spans full lines from this anchor to
   /// wherever the caret currently sits, so motions just move the
@@ -690,7 +741,7 @@ final class PlaceholderTextView: NSTextView {
 
   override func layout() {
     super.layout()
-    guard copyButtonClearance > 0, let container = textContainer else { return }
+    guard copyButtonClearance > 0, wrapsLines, let container = textContainer else { return }
     let containerWidth = container.size.width
     let rect = NSRect(
       x: containerWidth - copyButtonClearance,
@@ -698,6 +749,7 @@ final class PlaceholderTextView: NSTextView {
       width: copyButtonClearance,
       height: EditorMetrics.lineHeight
     )
+    if container.exclusionPaths.count == 1, container.exclusionPaths[0].bounds == rect { return }
     container.exclusionPaths = [NSBezierPath(rect: rect)]
   }
 
@@ -819,17 +871,208 @@ final class PlaceholderTextView: NSTextView {
 
   override func deleteBackward(_ sender: Any?) {
     if revertLastRenderedTokenIfPossible() { return }
+    if removeChecklistMarkerBeforeCaret() { return }
     super.deleteBackward(sender)
   }
 
   override func paste(_ sender: Any?) {
     isPasting = true
     defer { isPasting = false }
-    super.paste(sender)
+    guard let raw = NSPasteboard.general.string(forType: .string) else {
+      super.paste(sender)
+      return
+    }
+    insertDiscreteEdit(
+      ChecklistText.importFromPasteboard(raw),
+      replacing: selectedRange,
+      actionName: "Paste"
+    )
+  }
+
+  /// `insertText` is treated as typing and coalesces with neighbouring
+  /// keystrokes into one undo step. Paste, cut and vim operators must be
+  /// their own undo step, so break coalescing around them.
+  func insertDiscreteEdit(_ text: String, replacing range: NSRange, actionName: String? = nil) {
+    breakUndoCoalescing()
+    insertText(text, replacementRange: range)
+    breakUndoCoalescing()
+    if let actionName { undoManager?.setActionName(actionName) }
+  }
+
+  /// Vim `o`: on an empty checklist item open a plain line instead of
+  /// letting Return's "empty item ends the list" rule delete the item.
+  func insertNewlineForOpenLine() {
+    if let (item, _) = checklistItemAtCaret(), item.isEmpty {
+      insertText("\n", replacementRange: selectedRange)
+      return
+    }
+    insertNewline(nil)
+  }
+
+  override func cut(_ sender: Any?) {
+    guard selectedRange.length > 0 else {
+      super.cut(sender)
+      return
+    }
+    copy(sender)
+    insertDiscreteEdit("", replacing: selectedRange, actionName: "Cut")
+  }
+
+  // MARK: - Checklist editing
+
+  /// The checklist item on the caret's line, plus that line's range
+  /// (without its newline). `nil` when the selection isn't a caret or the
+  /// line doesn't start with a marker.
+  private func checklistItemAtCaret() -> (item: ChecklistText.Item, line: NSRange)? {
+    guard selectedRange.length == 0 else { return nil }
+    let nsString = string as NSString
+    let caret = selectedRange.location
+    var lineStart = 0
+    var lineEnd = 0
+    var contentsEnd = 0
+    nsString.getLineStart(
+      &lineStart,
+      end: &lineEnd,
+      contentsEnd: &contentsEnd,
+      for: NSRange(location: caret, length: 0)
+    )
+    let line = NSRange(location: lineStart, length: contentsEnd - lineStart)
+    guard let item = ChecklistText.item(in: nsString.substring(with: line) as NSString) else {
+      return nil
+    }
+    return (item, line)
+  }
+
+  /// Return on a checklist line continues the list at the same depth;
+  /// Return on an empty item ends the list (clears the marker).
+  override func insertNewline(_ sender: Any?) {
+    guard let (item, line) = checklistItemAtCaret(),
+      selectedRange.location > line.location + item.markerOffset
+    else {
+      super.insertNewline(sender)
+      return
+    }
+    let nsString = string as NSString
+    if item.isEmpty {
+      insertText("", replacementRange: line)
+      return
+    }
+    let continuation = ChecklistText.continuation(
+      forLine: nsString.substring(with: line) as NSString,
+      item: item
+    )
+    insertText(continuation, replacementRange: selectedRange)
+  }
+
+  /// Backspace right after a line's leading marker (and its space)
+  /// removes the marker entirely instead of leaving a stray `☐` or
+  /// reverting to `[ ]`.
+  private func removeChecklistMarkerBeforeCaret() -> Bool {
+    guard let (item, line) = checklistItemAtCaret() else { return false }
+    let caret = selectedRange.location - line.location
+    let markerEnd = item.markerOffset + 1
+    guard caret == item.contentOffset || caret == markerEnd else { return false }
+    let range = NSRange(location: line.location + item.markerOffset, length: caret - item.markerOffset)
+    insertText("", replacementRange: range)
+    return true
+  }
+
+  /// Lines touched by the selection that are checklist items.
+  private func checklistLinesInSelection() -> [NSRange] {
+    let nsString = string as NSString
+    let span = nsString.lineRange(for: selectedRange)
+    var result: [NSRange] = []
+    nsString.enumerateSubstrings(in: span, options: [.byLines, .substringNotRequired]) { _, range, _, _ in
+      if ChecklistText.item(in: nsString.substring(with: range) as NSString) != nil {
+        result.append(range)
+      }
+    }
+    return result
+  }
+
+  /// Tab on checklist lines indents them (wherever the caret is);
+  /// elsewhere Tab inserts a tab as usual.
+  override func insertTab(_ sender: Any?) {
+    let lines = checklistLinesInSelection()
+    guard !lines.isEmpty else {
+      super.insertTab(sender)
+      return
+    }
+    shiftChecklistLines(lines, indent: true)
+  }
+
+  override func insertBacktab(_ sender: Any?) {
+    let lines = checklistLinesInSelection()
+    guard !lines.isEmpty else {
+      super.insertBacktab(sender)
+      return
+    }
+    shiftChecklistLines(lines, indent: false)
+  }
+
+  private func shiftChecklistLines(_ lines: [NSRange], indent: Bool) {
+    let nsString = string as NSString
+    let selection = selectedRange
+    var edits: [(range: NSRange, text: String)] = []
+    for line in lines {
+      if indent {
+        edits.append((NSRange(location: line.location, length: 0), ChecklistText.indentUnit))
+        continue
+      }
+      let first = line.length > 0 ? nsString.character(at: line.location) : 0
+      if first == 0x09 {
+        edits.append((NSRange(location: line.location, length: 1), ""))
+      } else if first == 0x20 {
+        var count = 0
+        // swiftlint:disable opening_brace
+        while count < ChecklistText.tabWidth, count < line.length,
+          nsString.character(at: line.location + count) == 0x20
+        {
+          // swiftlint:enable opening_brace
+          count += 1
+        }
+        edits.append((NSRange(location: line.location, length: count), ""))
+      }
+    }
+    guard !edits.isEmpty else { return }
+    let span = NSRange(
+      location: edits[0].range.location,
+      length: NSMaxRange(lines[lines.count - 1]) - edits[0].range.location
+    )
+    let updated = NSMutableString(string: nsString.substring(with: span))
+    for edit in edits.reversed() {
+      let local = NSRange(location: edit.range.location - span.location, length: edit.range.length)
+      updated.replaceCharacters(in: local, with: edit.text)
+    }
+    let replacement = updated as String
+    guard shouldChangeText(in: span, replacementString: replacement) else { return }
+    replaceCharacters(in: span, with: replacement)
+    didChangeText()
+    // Map each selection edge through the edits; an edge inside removed
+    // indentation moves to where that indentation started.
+    func mapped(_ position: Int) -> Int {
+      var result = position
+      for edit in edits where edit.range.location < position {
+        let delta = (edit.text as NSString).length - edit.range.length
+        if NSMaxRange(edit.range) <= position {
+          result += delta
+        } else {
+          result -= position - edit.range.location
+        }
+      }
+      return max(0, result)
+    }
+    let start = mapped(selection.location)
+    let end = max(start, mapped(NSMaxRange(selection)))
+    setSelectedRange(NSRange(location: start, length: end - start))
   }
 
   override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
     stabilizeTypingAttributes()
+    // A rendered token is only revertible until the next edit; otherwise
+    // backspacing later through the line could hit the stale token's
+    // original end offset and turn `☐` back into `[ ]`.
+    lastRenderedToken = nil
     lastEditContext = EditContext(
       range: affectedCharRange,
       replacement: replacementString,
@@ -958,8 +1201,21 @@ final class PlaceholderTextView: NSTextView {
     guard delta != 0 else { return }
     let movement = delta > 0 ? moveDown(_:) : moveUp(_:)
     for _ in 0..<abs(delta) {
+      let before = selectedRange.location
+      let rowBefore = caretRowY(at: before)
       movement(nil)
+      // On the first/last row AppKit jumps to the document start/end
+      // without changing row; vim stays put instead.
+      if let rowBefore, rowBefore == caretRowY(at: selectedRange.location) {
+        setSelectedRange(NSRange(location: before, length: 0))
+        break
+      }
     }
+  }
+
+  private func caretRowY(at location: Int) -> CGFloat? {
+    editorCaretRect(in: self, cursor: location, width: 0, fallbackHeight: EditorMetrics.lineHeight)?
+      .origin.y
   }
 
   func executeDeleteMotion(_ motion: Motion) {
@@ -1394,9 +1650,42 @@ final class PlaceholderTextView: NSTextView {
     if shouldChangeText(in: absoluteRange, replacementString: replacement) {
       replaceCharacters(in: absoluteRange, with: replacement)
       didChangeText()
+      propagateChecklistParents(fromLineContaining: absoluteRange.location)
       return true
     }
     return false
+  }
+
+  /// Checks (or unchecks) ancestors so a parent item is checked exactly
+  /// when all of its directly nested checklist children are.
+  private func propagateChecklistParents(fromLineContaining location: Int) {
+    let nsString = string as NSString
+    var lineRanges: [NSRange] = []
+    nsString.enumerateSubstrings(
+      in: NSRange(location: 0, length: nsString.length),
+      options: [.byLines, .substringNotRequired]
+    ) { _, range, _, _ in
+      lineRanges.append(range)
+    }
+    if nsString.length == 0 || nsString.hasSuffix("\n") {
+      lineRanges.append(NSRange(location: nsString.length, length: 0))
+    }
+    guard
+      let changed = lineRanges.firstIndex(where: {
+        location >= $0.location && location <= NSMaxRange($0)
+      })
+    else { return }
+    let lines = lineRanges.map { nsString.substring(with: $0) }
+    let updates = ChecklistText.parentUpdates(lines: lines, changedLine: changed)
+    for (index, isChecked) in updates {
+      guard let item = ChecklistText.item(in: lines[index]) else { continue }
+      let range = NSRange(location: lineRanges[index].location + item.markerOffset, length: 1)
+      let marker = isChecked ? ChecklistText.checkedString : ChecklistText.uncheckedString
+      if shouldChangeText(in: range, replacementString: marker) {
+        replaceCharacters(in: range, with: marker)
+        didChangeText()
+      }
+    }
   }
 
   private func checklistMarkerRange(in lineText: String, near targetOffset: Int) -> NSRange? {
@@ -1429,14 +1718,7 @@ final class PlaceholderTextView: NSTextView {
     }
     let nsString = string as NSString
     let raw = nsString.substring(with: selectedRange)
-    let lines = raw.components(separatedBy: "\n").map { line -> String in
-      if line.hasPrefix("☑ ") { return "[x] " + String(line.dropFirst(2)) }
-      if line == "☑" { return "[x]" }
-      if line.hasPrefix("☐") { return "[ ]" + String(line.dropFirst(2)) }
-      if line == "☐" { return "[ ]" }
-      return line
-    }
-    let mapped = lines.joined(separator: "\n")
+    let mapped = ChecklistText.exportForPasteboard(raw)
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(mapped, forType: .string)
   }
@@ -1595,6 +1877,45 @@ final class FixedLineHeightLayoutManager: NSLayoutManager {
     super.setExtraLineFragmentRect(frag, usedRect: used, textContainer: textContainer)
   }
 
+  /// Skips the raw ☐ / ☑ glyphs: `PlaceholderTextView` draws an SF Symbol
+  /// in their place. Hiding them with a clear temporary colour alone isn't
+  /// enough, because selected text is drawn with `selectedTextAttributes`'
+  /// foreground colour, which made the font's sharp-cornered box show up
+  /// on top of the rounded symbol whenever a checklist line was selected.
+  override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+    guard let storage = textStorage, glyphsToShow.length > 0 else {
+      super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+      return
+    }
+    let nsString = storage.string as NSString
+    let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+    let searchRange = NSIntersectionRange(charRange, NSRange(location: 0, length: nsString.length))
+    let hasMarker =
+      nsString.rangeOfCharacter(from: Self.checkboxCharacters, options: [], range: searchRange).location
+      != NSNotFound
+    guard hasMarker else {
+      super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+      return
+    }
+    var runStart = glyphsToShow.location
+    let end = NSMaxRange(glyphsToShow)
+    for glyph in glyphsToShow.location..<end {
+      let character = characterIndexForGlyph(at: glyph)
+      guard character < nsString.length, ChecklistText.isMarker(nsString.character(at: character)) else {
+        continue
+      }
+      if glyph > runStart {
+        super.drawGlyphs(forGlyphRange: NSRange(location: runStart, length: glyph - runStart), at: origin)
+      }
+      runStart = glyph + 1
+    }
+    if end > runStart {
+      super.drawGlyphs(forGlyphRange: NSRange(location: runStart, length: end - runStart), at: origin)
+    }
+  }
+
+  private static let checkboxCharacters = CharacterSet(charactersIn: "☐☑")
+
   override func setLocation(
     _ location: NSPoint,
     forStartOfGlyphRange glyphRange: NSRange
@@ -1674,5 +1995,33 @@ extension FixedLineHeightLayoutManager: NSLayoutManagerDelegate {
       }
     }
     return glyphRange.length
+  }
+}
+
+// MARK: - OverlayScrollView
+
+/// Always uses overlay scrollers. With a mouse / external display attached
+/// macOS switches to legacy scrollers, which take ~15pt of content width
+/// when they appear. Near the end of a line that created a feedback loop:
+/// a typed character wraps -> the panel grows a row -> the vertical
+/// scroller toggles -> the width changes -> the line unwraps -> repeat,
+/// visible as text flickering between two rows. Overlay scrollers never
+/// change the content width (and the horizontal one in no-wrap mode never
+/// changes the HUD height).
+final class OverlayScrollView: NSScrollView {
+  override var scrollerStyle: NSScroller.Style {
+    get { .overlay }
+    // swiftlint:disable:next unused_setter_value
+    set { super.scrollerStyle = .overlay }
+  }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    super.scrollerStyle = .overlay
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    super.scrollerStyle = .overlay
   }
 }

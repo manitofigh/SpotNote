@@ -89,6 +89,8 @@ public final class SpotlightWindowController {
   private struct MeasuredHeightCache {
     let text: String
     let maxVisibleLines: Int
+    let panelWidth: Int
+    let wrapLines: Bool
     let chromeAbove: CGFloat
     let chromeBelow: CGFloat
     let height: CGFloat
@@ -159,6 +161,8 @@ public final class SpotlightWindowController {
     guard let measuredHeightCache else { return false }
     return measuredHeightCache.text == session.currentText
       && measuredHeightCache.maxVisibleLines == preferences.maxVisibleLines
+      && measuredHeightCache.panelWidth == preferences.panelWidth
+      && measuredHeightCache.wrapLines == preferences.wrapLines
       && measuredHeightCache.chromeAbove == chromeAbove
       && measuredHeightCache.chromeBelow == chromeBelow
   }
@@ -180,6 +184,7 @@ public final class SpotlightWindowController {
     installModifierMonitor()
     observeNavigationPreview()
     observeFuzzyPreview()
+    observePanelWidth()
     installVimCommandRunner()
     Task { [session] in await session.bootstrap() }
   }
@@ -221,6 +226,59 @@ public final class SpotlightWindowController {
         }
       }
       .store(in: &cancellables)
+  }
+
+  /// Resizes the HUD live when the width preference changes, keeping it
+  /// centred on its current midpoint and inside the screen.
+  private func observePanelWidth() {
+    preferences.$panelWidth
+      .removeDuplicates()
+      .dropFirst()
+      .sink { [weak self] _ in
+        // `@Published` emits in willSet; read the stored value next turn.
+        DispatchQueue.main.async { self?.applyPanelWidth() }
+      }
+      .store(in: &cancellables)
+  }
+
+  private func effectivePanelWidth(on screen: NSScreen?) -> CGFloat {
+    let preferred = CGFloat(preferences.panelWidth)
+    guard let visible = screen?.visibleFrame, visible.width > 0 else { return preferred }
+    return min(preferred, visible.width)
+  }
+
+  private func applyPanelWidth() {
+    guard let panel else { return }
+    let screen = panel.screen ?? NSScreen.main
+    let width = effectivePanelWidth(on: screen)
+    var frame = panel.frame
+    guard abs(frame.width - width) > 0.5 else { return }
+    frame.origin.x = (frame.midX - width / 2).rounded()
+    frame.size.width = width
+    if let visible = screen?.visibleFrame {
+      frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - width)
+    }
+    setPanelFrame(frame, display: true)
+    if panel.isVisible {
+      persistHUDPosition(of: panel)
+    } else {
+      pinnedOriginX = frame.origin.x
+    }
+    refitHeightAfterWidthChange(panel)
+  }
+
+  /// A width change re-wraps text without any edit, so nothing else would
+  /// recompute the row count: lay out at the new width and resize.
+  private func refitHeightAfterWidthChange(_ panel: NSPanel) {
+    panel.contentView?.layoutSubtreeIfNeeded()
+    guard let textView = editorTextView(),
+      let layoutManager = textView.layoutManager,
+      let container = textView.textContainer
+    else { return }
+    layoutManager.ensureLayout(for: container)
+    let rows = LineNumberRuler.displayRowCount(in: textView)
+    let editor = EditorMetrics.panelHeight(forLines: rows, maxLines: preferences.maxVisibleLines)
+    setPanelHeight(editor + chromeAboveEditor + chromeBelowEditor, animated: false)
   }
 
   private func observeFuzzyPreview() {
@@ -442,7 +500,7 @@ public final class SpotlightWindowController {
       forLines: 1,
       maxLines: preferences.maxVisibleLines
     )
-    let size = NSSize(width: EditorMetrics.panelWidth, height: initialHeight)
+    let size = NSSize(width: effectivePanelWidth(on: NSScreen.main), height: initialHeight)
     let panel = SpotlightPanel(
       contentRect: NSRect(origin: .zero, size: size),
       styleMask: Self.panelStyleMask,
@@ -586,6 +644,8 @@ public final class SpotlightWindowController {
     measuredHeightCache = MeasuredHeightCache(
       text: session.currentText,
       maxVisibleLines: preferences.maxVisibleLines,
+      panelWidth: preferences.panelWidth,
+      wrapLines: preferences.wrapLines,
       chromeAbove: chromeAbove,
       chromeBelow: chromeBelowEditor,
       height: height

@@ -8,12 +8,17 @@ public final class ThemePreferences: ObservableObject {
   public static let minVisibleLines = 1
   public static let maxVisibleLinesCap = 30
   public static let defaultVisibleLines = 3
+  public static let minPanelWidth = 420
+  public static let maxPanelWidth = 1400
+  public static let defaultPanelWidth = Int(EditorMetrics.panelWidth)
 
   private enum Key {
     static let selectedID = "theme.selected.id"
     static let showLineNumbers = "editor.showLineNumbers"
     static let showMenuBarIcon = "menubar.showIcon"
     static let maxVisibleLines = "editor.maxVisibleLines"
+    static let panelWidth = "hud.panelWidth"
+    static let wrapLines = "editor.wrapLines"
     static let showHints = "hud.showTutorial"
     static let vimMode = "editor.vimMode"
     static let showWordCount = "editor.showWordCount"
@@ -117,6 +122,25 @@ public final class ThemePreferences: ObservableObject {
     }
   }
 
+  /// HUD width in points. Clamped to `[minPanelWidth, maxPanelWidth]`;
+  /// the window controller additionally caps it to the screen width.
+  @Published public var panelWidth: Int {
+    didSet {
+      let clamped = Self.clampPanelWidth(panelWidth)
+      if clamped != panelWidth {
+        panelWidth = clamped
+        return
+      }
+      defaults.set(panelWidth, forKey: Key.panelWidth)
+    }
+  }
+
+  /// Soft-wrap long lines (default). When off, lines extend past the
+  /// right edge and the editor scrolls horizontally.
+  @Published public var wrapLines: Bool {
+    didSet { defaults.set(wrapLines, forKey: Key.wrapLines) }
+  }
+
   private let defaults: UserDefaults
 
   public init(defaults: UserDefaults = .standard) {
@@ -143,6 +167,13 @@ public final class ThemePreferences: ObservableObject {
     self.focusedBackgroundOpacity = min(max(0.1, storedFocusedOpacity ?? 0.70), 1.0)
     let stored = defaults.object(forKey: Key.maxVisibleLines) as? Int
     self.maxVisibleLines = Self.clampVisibleLines(stored ?? Self.defaultVisibleLines)
+    let storedWidth = defaults.object(forKey: Key.panelWidth) as? Int
+    self.panelWidth = Self.clampPanelWidth(storedWidth ?? Self.defaultPanelWidth)
+    self.wrapLines = Self.boolOrDefault(defaults, Key.wrapLines, default: true)
+  }
+
+  public static func clampPanelWidth(_ value: Int) -> Int {
+    min(max(minPanelWidth, value), maxPanelWidth)
   }
 
   public static func clampVisibleLines(_ value: Int) -> Int {

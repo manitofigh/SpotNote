@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AppKit
 
 extension PlaceholderTextView {
@@ -178,9 +179,100 @@ extension PlaceholderTextView {
       deleteVisualLineSelection(switchingToInsert: false)
     case .changeVisualLineSelection:
       deleteVisualLineSelection(switchingToInsert: true)
+    case .changeMotion(let motion):
+      executeDeleteMotion(motion)
+      executeVimAction(.switchToInsert)
+    case .deleteTextObject(let object):
+      deleteTextObject(object)
+    case .changeTextObject(let object):
+      deleteTextObject(object)
+      executeVimAction(.switchToInsert)
+    case .yankTextObject(let object):
+      yankTextObject(object)
+    case .yankLine(let count):
+      yankLines(count)
+    case .paste(let after, let count):
+      pasteFromRegister(after: after, count: count)
     default:
       break
     }
+  }
+
+  // MARK: - Text objects, yank & put
+
+  private func deleteTextObject(_ object: TextObject) {
+    let nsString = string as NSString
+    guard
+      let range = VimTextObjects.range(of: object, in: nsString, at: selectedRange.location),
+      range.length > 0
+    else { return }
+    insertDiscreteEdit("", replacing: range)
+    setSelectedRange(NSRange(location: range.location, length: 0))
+  }
+
+  private func yankTextObject(_ object: TextObject) {
+    let nsString = string as NSString
+    guard let range = VimTextObjects.range(of: object, in: nsString, at: selectedRange.location)
+    else { return }
+    writeVimRegister(nsString.substring(with: range))
+    setSelectedRange(NSRange(location: range.location, length: 0))
+  }
+
+  /// `yy` / `<n>yy` -- yanks whole lines (always newline-terminated so
+  /// `p` knows to put them linewise).
+  private func yankLines(_ count: Int) {
+    let nsString = string as NSString
+    guard nsString.length > 0 else { return }
+    var range = nsString.lineRange(for: NSRange(location: selectedRange.location, length: 0))
+    for _ in 1..<max(1, count) {
+      let next = NSMaxRange(range)
+      guard next < nsString.length else { break }
+      range.length += nsString.lineRange(for: NSRange(location: next, length: 0)).length
+    }
+    var text = nsString.substring(with: range)
+    if !text.hasSuffix("\n") { text += "\n" }
+    writeVimRegister(text)
+  }
+
+  /// Vim registers share the system pasteboard (like `clipboard=unnamed`),
+  /// using the same `[ ]` / `[x]` export as ⌘C so checklists survive.
+  private func writeVimRegister(_ raw: String) {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(ChecklistText.exportForPasteboard(raw), forType: .string)
+  }
+
+  /// `p` / `P`. Newline-terminated register text is put linewise (below /
+  /// above the current line); anything else is put after / before the
+  /// caret character.
+  private func pasteFromRegister(after: Bool, count: Int) {
+    guard let raw = NSPasteboard.general.string(forType: .string), !raw.isEmpty else { return }
+    let text = ChecklistText.importFromPasteboard(raw)
+    let payload = String(repeating: text, count: max(1, count))
+    let nsString = string as NSString
+    let caret = min(selectedRange.location, nsString.length)
+    if (text as NSString).hasSuffix("\n") {
+      let line = nsString.lineRange(for: NSRange(location: caret, length: 0))
+      var insertAt = after ? NSMaxRange(line) : line.location
+      var inserted = payload
+      if after, insertAt == nsString.length, !(nsString.length == 0 || nsString.hasSuffix("\n")) {
+        // Last line has no newline: put "\n<lines>" and drop the trailing one.
+        inserted = "\n" + String(payload.dropLast())
+        insertAt = nsString.length
+      }
+      insertDiscreteEdit(inserted, replacing: NSRange(location: insertAt, length: 0), actionName: "Paste")
+      let lineStart = inserted.hasPrefix("\n") ? insertAt + 1 : insertAt
+      setSelectedRange(NSRange(location: lineStart, length: 0))
+      executeMotion(.firstNonBlank)
+      return
+    }
+    var insertAt = caret
+    if after, caret < nsString.length, nsString.character(at: caret) != 0x0A {
+      insertAt = NSMaxRange(nsString.rangeOfComposedCharacterSequence(at: caret))
+    }
+    insertDiscreteEdit(payload, replacing: NSRange(location: insertAt, length: 0), actionName: "Paste")
+    let end = insertAt + (payload as NSString).length
+    setSelectedRange(NSRange(location: max(insertAt, end - 1), length: 0))
   }
 
   // MARK: - Visual line
@@ -231,11 +323,11 @@ extension PlaceholderTextView {
   private func yankVisualLineSelection() {
     let nsString = string as NSString
     let range = selectedRange
-    if range.length > 0, range.length <= nsString.length {
-      let text = nsString.substring(with: range)
-      let pasteboard = NSPasteboard.general
-      pasteboard.clearContents()
-      pasteboard.setString(text, forType: .string)
+    if range.length > 0, NSMaxRange(range) <= nsString.length {
+      var text = nsString.substring(with: range)
+      // The last line has no newline of its own; keep the yank linewise.
+      if !text.hasSuffix("\n") { text += "\n" }
+      writeVimRegister(text)
     }
     exitVisualLineSelection(restoreCaretTo: range.location)
   }
@@ -394,7 +486,7 @@ enum VimActionDispatcher {
       view.deleteToEndOfParagraph(view)
     case .openLineBelow:
       view.moveToEndOfLine(view)
-      view.insertNewline(view)
+      view.insertNewlineForOpenLine()
       view.notifyVimModeChanged()
       view.needsDisplay = true
     case .openLineAbove:
