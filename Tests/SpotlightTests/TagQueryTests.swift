@@ -73,6 +73,25 @@ struct FuzzyTagSearchTests {
     #expect(results.map(\.position) == [2, 3])
   }
 
+  @Test("matching tags are highlighted and listed as chips")
+  func highlightsMatchingTags() {
+    let results = FuzzyTagSearch.rank(query: "#work ", in: Self.corpus, limit: 50, tagSets: [:])
+    #expect(results.map(\.matchedTags) == [["work"], ["work/q3"]])
+    let text = Self.corpus[1].text
+    let ranges = results[0].matchRanges.map { range -> String in
+      let start = text.index(text.startIndex, offsetBy: range.location)
+      return String(text[start..<text.index(start, offsetBy: range.length)])
+    }
+    #expect(ranges == ["#work"])
+  }
+
+  @Test("tag highlight offsets count characters, not UTF-16 units")
+  func highlightOffsetsSurviveEmoji() {
+    let note = Self.chat("👩‍💻 log #dev")
+    let results = FuzzyTagSearch.rank(query: "#de", in: [note], limit: 50, tagSets: [:])
+    #expect(results.first?.matchRanges == [TextRange(location: 6, length: 4)])
+  }
+
   @Test("remaining words are fuzzy-matched within the tag-filtered notes")
   func tagPlusText() {
     let results = FuzzyTagSearch.rank(query: "#work roadmap", in: Self.corpus, limit: 50, tagSets: [:])

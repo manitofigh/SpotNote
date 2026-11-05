@@ -17,6 +17,9 @@ struct FuzzyResult: Equatable, Sendable, Identifiable {
   /// the palette so users can correlate hits with the ⌃N/⌃P "note N of
   /// M" indicator.
   let position: Int
+  /// Note tags that satisfied a `#tag` filter in the query, shown as
+  /// chips on the result row.
+  var matchedTags: [String] = []
   var id: UUID { chat.id }
 }
 

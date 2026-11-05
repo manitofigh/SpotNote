@@ -72,6 +72,7 @@ struct FuzzyPreviewCard: View {
     let excerpt = FuzzyPreviewExcerpt.make(for: result)
     let text = excerpt.text
     var attributed = AttributedString(text)
+    TagChip.colorTags(in: &attributed, text: text, mode: theme.mode)
     guard !excerpt.ranges.isEmpty else { return attributed }
     let highlight = Color(red: 0.95, green: 0.78, blue: 0.28).opacity(theme.mode == .dark ? 0.26 : 0.34)
     for range in excerpt.ranges {

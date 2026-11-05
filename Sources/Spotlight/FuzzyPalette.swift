@@ -142,6 +142,7 @@ struct FuzzyPalette: View {
         .foregroundStyle(isSelected ? theme.text : theme.text.opacity(0.7))
         .lineLimit(1)
       Spacer(minLength: 0)
+      ForEach(result.matchedTags.prefix(3), id: \.self) { TagChip(name: $0, mode: theme.mode) }
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 5)

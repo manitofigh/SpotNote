@@ -45,6 +45,12 @@ struct TagQuery: Equatable, Sendable {
     return noteTags.contains { $0.hasPrefix(typingPrefix) }
   }
 
+  /// Whether a single note tag satisfies any of the query's tag filters;
+  /// used to pick which tag occurrences to highlight in results.
+  func accepts(_ name: String) -> Bool {
+    tags.contains { name == $0 || name.hasPrefix($0 + "/") } || typingPrefix.map { name.hasPrefix($0) } == true
+  }
+
   private static func tagName(of token: Substring) -> String? {
     guard token.first == "#" else { return nil }
     let body = token.dropFirst()
