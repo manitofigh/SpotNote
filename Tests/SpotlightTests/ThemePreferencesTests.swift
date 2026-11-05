@@ -61,11 +61,17 @@ struct ThemePreferencesTests {
     }
   }
 
-  @Test("catalog has exactly five dark and five light themes")
+  @Test("catalog has exactly ten dark and ten light themes")
   func catalogSize() {
-    #expect(ThemeCatalog.darkThemes.count == 5)
-    #expect(ThemeCatalog.lightThemes.count == 5)
-    #expect(ThemeCatalog.all.count == 10)
+    #expect(ThemeCatalog.darkThemes.count == 10)
+    #expect(ThemeCatalog.lightThemes.count == 10)
+    #expect(ThemeCatalog.all.count == 20)
+  }
+
+  @Test("theme ids and names are unique across the catalog")
+  func catalogIdentifiersAreUnique() {
+    #expect(Set(ThemeCatalog.all.map(\.id)).count == ThemeCatalog.all.count)
+    #expect(Set(ThemeCatalog.all.map(\.name)).count == ThemeCatalog.all.count)
   }
 
   @Test("showLineNumbers defaults to true on first launch")

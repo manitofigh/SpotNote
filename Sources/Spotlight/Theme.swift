@@ -25,7 +25,8 @@ public struct Theme: Equatable, Identifiable, Sendable {
   }
 }
 
-/// Ten curated themes -- five dark, five light.
+/// Twenty curated themes -- ten dark, ten light. The original muted neutrals
+/// live here; the distinctly tinted set lives in `ThemeCatalog+Tinted.swift`.
 enum ThemeCatalog {
   // MARK: Dark
 
@@ -98,7 +99,7 @@ enum ThemeCatalog {
     background: Color(red: 0.965, green: 0.969, blue: 0.976),
     border: Color.black.opacity(0.06),
     text: Color(red: 0.122, green: 0.161, blue: 0.216),
-    placeholder: Color(red: 0.612, green: 0.639, blue: 0.686)
+    placeholder: Color(red: 0.510, green: 0.537, blue: 0.588)
   )
 
   static let bone = Theme(
@@ -118,7 +119,7 @@ enum ThemeCatalog {
     background: Color(red: 0.961, green: 0.941, blue: 0.910),
     border: Color.black.opacity(0.07),
     text: Color(red: 0.239, green: 0.184, blue: 0.122),
-    placeholder: Color(red: 0.612, green: 0.557, blue: 0.478)
+    placeholder: Color(red: 0.565, green: 0.510, blue: 0.431)
   )
 
   static let porcelain = Theme(
@@ -131,8 +132,14 @@ enum ThemeCatalog {
     placeholder: Color(red: 0.557, green: 0.557, blue: 0.576)
   )
 
-  static let darkThemes: [Theme] = [obsidian, ink, graphite, midnight, charcoal]
-  static let lightThemes: [Theme] = [parchment, mist, bone, linen, porcelain]
+  static let darkThemes: [Theme] = [
+    obsidian, ink, graphite, midnight, charcoal,
+    fjord, espresso, evergreen, dusk, eclipse
+  ]
+  static let lightThemes: [Theme] = [
+    parchment, mist, bone, linen, porcelain,
+    sepia, glacier, sage, blush, lumen
+  ]
   static let all: [Theme] = darkThemes + lightThemes
 
   /// Default theme applied on first launch.
