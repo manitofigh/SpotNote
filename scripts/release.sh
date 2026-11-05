@@ -257,7 +257,7 @@ cat > "$RELEASE_NOTES_PATH" <<HTML
   <h2>What’s new</h2>
   <ul>
     <li>New: links, emails, file paths and dates are detected. ⌘-click to open them.</li>
-    <li>New: <code>#tags</code>. Hover a tag to give it a colour, and type <code>#tag</code> in ⌘P search to filter notes.</li>
+    <li>New: <code>#tags</code>. Hover a tag to give it a colour, and type <code>#tag</code> in ⌘P search to filter notes. Write <code>\#word</code> for a plain hash, or turn tag highlighting off in Settings &gt; Editor.</li>
     <li>New: optional Markdown preview (Settings &gt; Editor). Headings, bold, italic, strikethrough and links render in place; the line you are on shows the raw text.</li>
     <li>New: keep your notes as a folder of Markdown files (Settings &gt; Storage), e.g. in iCloud Drive or an Obsidian vault. Your existing notes are copied, never moved. You can also import notes from any folder.</li>
     <li>New: smarter math. <code>100k/2k</code>, variables (<code>rate = 42</code>, then <code>rate * 8</code>), percentages (<code>20% of 150</code>, <code>150 + 10%</code>) and unit conversions (<code>5 km in mi</code>, <code>3h 20m in min</code>, <code>100 F in C</code>).</li>
