@@ -86,7 +86,7 @@ public final class StorageLocationController: ObservableObject {
     await store.flush()
     if await store.takeFallbackWrites() {
       needsResync = true
-      issue = "The notes folder is unavailable. New edits are being kept in built-in storage."
+      issue = "The notes folder is unavailable. New edits are saved in SpotNote's app storage for now."
     }
     guard await store.isUsingMarkdownFolder else { return false }
     do {
@@ -166,12 +166,12 @@ public final class StorageLocationController: ObservableObject {
 
   func switchToBuiltIn(store: ChatStore, onLibraryChanged: @escaping @MainActor () -> Void) {
     let alert = NSAlert()
-    alert.messageText = "Switch back to built-in storage?"
+    alert.messageText = "Stop using the folder?"
     alert.informativeText =
-      "Built-in storage still holds your notes as they were when you started using the folder, including "
-      + "notes you have since deleted there. “Copy Notes & Switch” also brings over notes created or edited "
-      + "in the folder since then. “Switch Only” shows just the old built-in notes; recent folder edits and "
-      + "new notes won't appear. Either way the folder and its files stay untouched."
+      "SpotNote will go back to saving notes in its own app storage, which still has your notes as they were "
+      + "before you started using the folder (notes you deleted since then will reappear).\n\n"
+      + "“Copy Notes & Switch” also brings over everything you created or edited in the folder. "
+      + "“Switch Only” doesn't. Either way the folder and its files are left as they are."
     alert.addButton(withTitle: "Copy Notes & Switch")
     alert.addButton(withTitle: "Switch Only")
     alert.addButton(withTitle: "Cancel")
@@ -189,7 +189,7 @@ public final class StorageLocationController: ObservableObject {
         self.activeFolder = nil
         self.issue = nil
         let detail = copy ? " Copied \(Self.noteCount(copied))." : ""
-        self.status = Status(isError: false, message: "Using built-in storage.\(detail)")
+        self.status = Status(isError: false, message: "Now saving notes in app storage.\(detail)")
         onLibraryChanged()
       } catch {
         self.status = Status(isError: true, message: error.localizedDescription)
@@ -267,13 +267,13 @@ public final class StorageLocationController: ObservableObject {
     scopedURL = nil
     activeFolder = nil
     needsResync = true
-    issue = "\(reason) Using built-in storage for now; edits made here are copied to the folder once it's back."
+    issue = "\(reason) Notes are saved in SpotNote's app storage for now and copied to the folder once it's back."
   }
 
   private static func portMessage(_ summary: PortSummary, folder: URL) -> String {
-    var message = "Now storing notes in “\(folder.lastPathComponent)”. Copied \(noteCount(summary.copied))"
+    var message = "Now saving notes in “\(folder.lastPathComponent)”. Copied \(noteCount(summary.copied))"
     if summary.conflictCopies > 0 { message += ", \(summary.conflictCopies) as conflict copies" }
-    return message + "; built-in notes are kept as a backup."
+    return message + ". The originals stay in app storage, so nothing is lost if you switch back."
   }
 
   private static func noteCount(_ count: Int) -> String {

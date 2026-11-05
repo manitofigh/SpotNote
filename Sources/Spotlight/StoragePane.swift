@@ -64,12 +64,12 @@ struct StoragePane: View {
         buttons: [
           StorageButton("Show in Finder", isDisabled: false, action: storage.revealActiveFolder),
           StorageButton(
-            "Change…",
+            "Change Folder…",
             isDisabled: storage.isBusy,
             action: { storage.chooseFolder(store: store, onLibraryChanged: onLibraryChanged) }
           ),
           StorageButton(
-            "Use Built-in",
+            "Use App Storage",
             isDisabled: storage.isBusy,
             action: { storage.switchToBuiltIn(store: store, onLibraryChanged: onLibraryChanged) }
           )
@@ -78,8 +78,9 @@ struct StoragePane: View {
     } else {
       StorageActionRow(
         icon: "internaldrive",
-        title: "Built-in storage",
-        subtitle: "Store notes as Markdown files in a folder you choose (iCloud Drive, Dropbox, an Obsidian vault…).",
+        title: "App storage",
+        subtitle: "Notes are saved in SpotNote's own data on this Mac. Choose a folder to keep them as Markdown "
+          + "files instead (iCloud Drive, Dropbox, an Obsidian vault…).",
         buttons: builtInButtons
       )
     }
@@ -113,8 +114,10 @@ private struct StorageActionRow: View {
   let subtitle: String
   let buttons: [StorageButton]
 
+  /// A single button sits on the trailing edge; several go on their own
+  /// row under the text so neither the labels nor the path get squeezed.
   var body: some View {
-    HStack(spacing: 14) {
+    HStack(alignment: buttons.count > 1 ? .top : .center, spacing: 14) {
       Image(systemName: icon)
         .font(.system(size: 15, weight: .semibold))
         .foregroundStyle(.secondary)
@@ -126,19 +129,29 @@ private struct StorageActionRow: View {
         Text(subtitle)
           .font(.subheadline)
           .foregroundStyle(.secondary)
-          .lineLimit(2)
+          .lineLimit(3)
           .truncationMode(.middle)
+          .fixedSize(horizontal: false, vertical: true)
+        if buttons.count > 1 {
+          buttonRow.padding(.top, 8)
+        }
       }
       Spacer(minLength: 0)
-      HStack(spacing: 8) {
-        ForEach(buttons.indices, id: \.self) { index in
-          SettingsPillButton(buttons[index].label, action: buttons[index].action)
-            .disabled(buttons[index].isDisabled)
-        }
+      if buttons.count == 1 {
+        buttonRow
       }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 10)
+  }
+
+  private var buttonRow: some View {
+    HStack(spacing: 8) {
+      ForEach(buttons.indices, id: \.self) { index in
+        SettingsPillButton(buttons[index].label, action: buttons[index].action)
+          .disabled(buttons[index].isDisabled)
+      }
+    }
   }
 }
 

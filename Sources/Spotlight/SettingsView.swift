@@ -531,6 +531,8 @@ struct SettingsPillButton: View {
       Text(label)
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(textColor)
+        .lineLimit(1)
+        .fixedSize()
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(face)
