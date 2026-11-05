@@ -2,13 +2,19 @@
 
 A Spotlight-style macOS note capture app. Toggle with **⌘⇧Space**.
 
-Live site: https://spotnote.org
+Website: https://spotnote.org
 
-## Requirements
+## Download
+
+Grab the latest `.dmg` from [spotnote.org](https://spotnote.org) or the [GitHub releases page](https://github.com/manitofigh/SpotNote/releases/latest). Requires macOS 14+.
+
+## Development
+
+### Requirements
 
 macOS 14+, Xcode 16+ (Swift 6 toolchain).
 
-## Quick start
+### Quick start
 
 ```bash
 ./scripts/setup.sh   # one-time: brew, swift-format, swiftlint, periphery, lizard
@@ -17,7 +23,7 @@ macOS 14+, Xcode 16+ (Swift 6 toolchain).
 
 Equivalent Make targets exist for every script: `make build`, `make run`, `make test`, `make ci`.
 
-## Common tasks
+### Common tasks
 
 | Task | Script | Make |
 | --- | --- | --- |
