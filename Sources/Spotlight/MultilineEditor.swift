@@ -46,6 +46,7 @@ struct MultilineEditor: NSViewRepresentable {
   var wrapLines: Bool = true
   /// Optional Markdown live preview (see `MarkdownPreviewStyler`).
   var markdownPreviewEnabled: Bool = false
+  var highlightTagsEnabled: Bool = true
   /// Owning controller used to mirror normal/insert mode into SwiftUI
   /// state, drive the `:` / `/` prompt buffer, and dispatch parsed
   /// commands. `nil` while vim mode is off (the editor short-circuits
@@ -169,6 +170,7 @@ struct MultilineEditor: NSViewRepresentable {
     // continually steal the user's caret.
     applyFindHighlight(textView: textView, coordinator: context.coordinator)
     syncMarkdownPreview(on: textView)
+    syncTagHighlighting(on: textView)
 
     // Re-evaluate the panel height: text (via bindings), `maxVisibleLines`,
     // and `extraChromeHeight` can all change here, and the editor delegate
@@ -425,7 +427,7 @@ struct MultilineEditor: NSViewRepresentable {
     if let layoutManager = textView.layoutManager {
       LinkStyler.apply(to: layoutManager, text: textView.string as NSString, theme: theme)
     }
-    TagStyler.apply(to: textView, theme: theme)
+    applyTagHighlighting(on: textView)
   }
 
   /// Switches between soft-wrapping (container tracks the view width) and
@@ -747,6 +749,8 @@ final class PlaceholderTextView: NSTextView {
   /// those layout-dependent widths to leak into the renderer.
   private let insertionPointWidth: CGFloat = 1
   var markdownPreview = MarkdownPreviewState()
+  /// Whether the last restyle painted `#tags` (see `syncTagHighlighting`).
+  var tagsHighlighted = false
 
   var vimModeEnabled: Bool = false {
     didSet {

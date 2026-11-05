@@ -223,6 +223,7 @@ struct SpotlightRootView: View {
       vimModeEnabled: preferences.vimMode,
       wrapLines: preferences.wrapLines,
       markdownPreviewEnabled: preferences.markdownPreview,
+      highlightTagsEnabled: preferences.highlightTags,
       vimController: vimController,
       onEscape: onEscape,
       onCommitNavigationSelection: session.commitNavigationSelection,

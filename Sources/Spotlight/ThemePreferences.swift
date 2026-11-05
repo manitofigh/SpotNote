@@ -20,6 +20,7 @@ public final class ThemePreferences: ObservableObject {
     static let panelWidth = "hud.panelWidth"
     static let wrapLines = "editor.wrapLines"
     static let markdownPreview = "editor.markdownPreview"
+    static let highlightTags = "editor.highlightTags"
     static let showHints = "hud.showTutorial"
     static let vimMode = "editor.vimMode"
     static let showWordCount = "editor.showWordCount"
@@ -148,6 +149,12 @@ public final class ThemePreferences: ObservableObject {
     didSet { defaults.set(markdownPreview, forKey: Key.markdownPreview) }
   }
 
+  /// Colour `#tags` in the editor and show the hover colour menu. On by
+  /// default; ⌘P tag filtering works either way.
+  @Published public var highlightTags: Bool {
+    didSet { defaults.set(highlightTags, forKey: Key.highlightTags) }
+  }
+
   private let defaults: UserDefaults
 
   public init(defaults: UserDefaults = .standard) {
@@ -178,6 +185,7 @@ public final class ThemePreferences: ObservableObject {
     self.panelWidth = Self.clampPanelWidth(storedWidth ?? Self.defaultPanelWidth)
     self.wrapLines = Self.boolOrDefault(defaults, Key.wrapLines, default: true)
     self.markdownPreview = Self.boolOrDefault(defaults, Key.markdownPreview, default: false)
+    self.highlightTags = Self.boolOrDefault(defaults, Key.highlightTags, default: true)
   }
 
   public static func clampPanelWidth(_ value: Int) -> Int {

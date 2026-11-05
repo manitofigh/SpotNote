@@ -211,4 +211,13 @@ struct ThemePreferencesTests {
     prefs.markdownPreview = true
     #expect(ThemePreferences(defaults: defaults).markdownPreview)
   }
+
+  @Test("tag highlighting is on by default and persists when disabled")
+  func highlightTagsDefaultsOn() {
+    let defaults = makeDefaults()
+    let prefs = ThemePreferences(defaults: defaults)
+    #expect(prefs.highlightTags)
+    prefs.highlightTags = false
+    #expect(ThemePreferences(defaults: defaults).highlightTags == false)
+  }
 }

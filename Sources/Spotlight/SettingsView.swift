@@ -458,6 +458,17 @@ private struct EditorPane: View {
             set: { preferences.markdownPreview = $0 }
           )
         )
+
+        SettingsDivider()
+
+        SettingsToggleRow(
+          title: "Highlight #tags",
+          subtitle: "Colour tags and show a colour menu on hover. Type \\#word to write a plain #word.",
+          isOn: Binding(
+            get: { preferences.highlightTags },
+            set: { preferences.highlightTags = $0 }
+          )
+        )
       }
 
       HistorySettingsCard()

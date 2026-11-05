@@ -30,11 +30,16 @@ final class TagHoverController: NSResponder {
   @available(*, unavailable)
   required init?(coder: NSCoder) { nil }
 
+  /// The controller already installed on `textView`, if any.
+  static func existing(on textView: NSTextView) -> TagHoverController? {
+    textView.subviews.lazy.compactMap { $0 as? TagChevronView }.first?.controller
+  }
+
   /// Returns the controller for `textView`, installing the tracking area
   /// and chevron on first call.
   static func attached(to textView: NSTextView) -> TagHoverController {
-    if let existing = textView.subviews.lazy.compactMap({ $0 as? TagChevronView }).first {
-      return existing.controller
+    if let existing = existing(on: textView) {
+      return existing
     }
     let controller = TagHoverController(textView: textView)
     let chevron = TagChevronView(controller: controller)
