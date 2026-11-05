@@ -33,7 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     preferences: preferences,
     store: chatStore,
     shortcuts: shortcutStore,
-    onOpenSettings: { [weak self] in self?.showSettings() }
+    onOpenSettings: { [weak self] in self?.showSettings() },
+    history: NoteHistoryStore.shared
   )
   private var menuBar: MenuBarController?
   private var hotkey: GlobalHotkey?
@@ -191,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // main-actor save task that can't run while we block below; hand the
     // live editor text to the store directly.
     let unsaved = spotlight.unsavedEditorSnapshot()
+    let history = NoteHistoryStore.isEnabled() ? NoteHistoryStore.shared : nil
     let semaphore = DispatchSemaphore(value: 0)
     // Detached: the main thread is blocked on the semaphore below, so a
     // main-actor-inherited Task would never start and the flush would
@@ -198,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     Task.detached {
       if let unsaved { await store.update(id: unsaved.id, text: unsaved.text) }
       await store.flush()
+      if let unsaved { await history?.record(unsaved.id, text: unsaved.text, trigger: .checkpoint) }
       semaphore.signal()
     }
     _ = semaphore.wait(timeout: .now() + .milliseconds(800))

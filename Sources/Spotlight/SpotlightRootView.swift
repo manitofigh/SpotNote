@@ -27,6 +27,7 @@ struct SpotlightRootView: View {
   @ObservedObject var command: CommandController
   @ObservedObject var copy: CopyController
   @ObservedObject var vimController: VimController
+  @ObservedObject var history: HistoryController
   /// Called synchronously from the editor delegate when the text's line
   /// count changes, so the panel resize happens in the same runloop tick
   /// as the text mutation (no flash).
@@ -80,6 +81,8 @@ struct SpotlightRootView: View {
       total += FuzzyPalette.reservedHeight
     } else if command.isVisible {
       total += CommandPalette.reservedHeight
+    } else if history.isVisible {
+      total += HistoryPalette.reservedHeight
     } else if session.navigationPreview != nil {
       total += NavigationOverlay.reservedHeight
     }
@@ -127,6 +130,12 @@ struct SpotlightRootView: View {
           .padding(.bottom, EditorMetrics.outerPadding)
           .frame(height: CommandPalette.reservedHeight)
           .transition(.opacity)
+      } else if history.isVisible {
+        HistoryPalette(controller: history, theme: theme)
+          .padding(.horizontal, EditorMetrics.outerPadding)
+          .padding(.bottom, EditorMetrics.outerPadding)
+          .frame(height: HistoryPalette.reservedHeight)
+          .transition(.opacity)
       } else if let preview = session.navigationPreview {
         NavigationOverlay(
           preview: preview,
@@ -146,6 +155,7 @@ struct SpotlightRootView: View {
     .animation(.easeOut(duration: 0.10), value: find.isVisible)
     .animation(.easeOut(duration: 0.10), value: fuzzy.isVisible)
     .animation(.easeOut(duration: 0.10), value: command.isVisible)
+    .animation(.easeOut(duration: 0.10), value: history.isVisible)
     .onChange(of: session.currentID) { _, _ in
       // Match ranges belong to the previous note's text.
       if !find.query.isEmpty { find.search(in: session.currentText, reveal: false) }
@@ -160,6 +170,9 @@ struct SpotlightRootView: View {
       if !isVisible { focusTrigger.pulse() }
     }
     .onChange(of: command.isVisible) { _, isVisible in
+      if !isVisible { focusTrigger.pulse() }
+    }
+    .onChange(of: history.isVisible) { _, isVisible in
       if !isVisible { focusTrigger.pulse() }
     }
     .onChange(of: preferences.showHints) { _, _ in
@@ -180,7 +193,7 @@ struct SpotlightRootView: View {
 
   private var hasAttachedBottom: Bool {
     showsBottomBar || session.navigationPreview != nil
-      || fuzzy.isVisible || command.isVisible
+      || fuzzy.isVisible || command.isVisible || history.isVisible
   }
 
   private var editorCardShape: UnevenRoundedRectangle {
@@ -233,7 +246,7 @@ struct SpotlightRootView: View {
   }
 
   private var hasOverlayBelow: Bool {
-    fuzzy.isVisible || command.isVisible || session.navigationPreview != nil
+    fuzzy.isVisible || command.isVisible || history.isVisible || session.navigationPreview != nil
   }
 
 }

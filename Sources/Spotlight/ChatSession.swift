@@ -48,6 +48,9 @@ final class ChatSession: ObservableObject {
   var lastDeleted: Chat? { deletedStack.last }
 
   private let store: ChatStore
+  /// Version history, independent of the note storage backend. `nil`
+  /// disables history entirely (tests, previews).
+  let history: NoteHistoryStore?
   private var previewDismissTask: Task<Void, Never>?
   /// While true, `announce` skips scheduling auto-dismiss so the
   /// navigation overlay stays put. Driven by the window controller's
@@ -60,8 +63,9 @@ final class ChatSession: ObservableObject {
   private static let previewDismissDelay: Duration = .milliseconds(1400)
   private static let deletePreviewDelay: Duration = .milliseconds(4000)
 
-  init(store: ChatStore) {
+  init(store: ChatStore, history: NoteHistoryStore? = nil) {
     self.store = store
+    self.history = history
   }
 
   /// Loads the chat list and restores the most-recently-edited chat. If
@@ -124,6 +128,7 @@ final class ChatSession: ObservableObject {
   /// second blank slate).
   func newChat() async {
     deletedStack = []
+    checkpointHistory()
     guard await createBlankChat() else { return }
     announce("new note")
   }
@@ -147,6 +152,7 @@ final class ChatSession: ObservableObject {
     let count = chats.count
     let next = ((index + delta) % count + count) % count
     let chat = chats[next]
+    checkpointHistory()
     currentID = chat.id
     currentText = chat.text
     announce("note \(next + 1) of \(count)")
@@ -170,6 +176,7 @@ final class ChatSession: ObservableObject {
     // fed from `chats`) would reload the stale text and the next
     // keystroke would persist it over the user's edits.
     syncCurrentTextIntoChats()
+    checkpointHistory()
     currentID = chat.id
     currentText = chats.first(where: { $0.id == chat.id })?.text ?? chat.text
   }
@@ -185,6 +192,7 @@ final class ChatSession: ObservableObject {
       chats.first(where: { $0.id == id })
       ?? Chat(id: id, createdAt: Date(), updatedAt: Date(), text: currentText)
     snapshot.text = currentText
+    await recordHistoryBeforeDelete(snapshot)
     try? await store.delete(id: id)
     deletedStack.append(snapshot)
     chats = await store.list()
@@ -206,6 +214,7 @@ final class ChatSession: ObservableObject {
   func undoDelete() async {
     guard let chat = deletedStack.popLast() else { return }
     try? await store.restore(chat)
+    await recordHistoryUndelete(chat.id)
     chats = await store.list()
     currentID = chat.id
     currentText = chat.text
@@ -239,6 +248,7 @@ final class ChatSession: ObservableObject {
     let snapshot = currentText
     let store = store
     Task { await store.update(id: id, text: snapshot) }
+    recordHistoryEdit(id: id, text: snapshot)
   }
 
   // MARK: - Private

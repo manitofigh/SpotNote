@@ -451,6 +451,8 @@ private struct EditorPane: View {
           )
         )
       }
+
+      HistorySettingsCard()
     }
   }
 }

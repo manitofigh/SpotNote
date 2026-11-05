@@ -41,6 +41,7 @@ public final class SpotlightWindowController {
   let findController = FindController()
   private let fuzzyController = FuzzyController()
   private let commandController = CommandController()
+  let historyController = HistoryController()
   private let copyController = CopyController()
   let vimController = VimController()
   private let onOpenSettings: () -> Void
@@ -136,6 +137,8 @@ public final class SpotlightWindowController {
       height += FuzzyPalette.reservedHeight
     } else if commandController.isVisible {
       height += CommandPalette.reservedHeight
+    } else if historyController.isVisible {
+      height += HistoryPalette.reservedHeight
     } else if session.navigationPreview != nil {
       height += NavigationOverlay.reservedHeight
     }
@@ -172,10 +175,11 @@ public final class SpotlightWindowController {
     store: ChatStore,
     shortcuts: ShortcutStore,
     onOpenSettings: @escaping () -> Void,
-    defaults: UserDefaults = .standard
+    defaults: UserDefaults = .standard,
+    history: NoteHistoryStore? = nil
   ) {
     self.preferences = preferences
-    self.session = ChatSession(store: store)
+    self.session = ChatSession(store: store, history: history)
     self.shortcuts = shortcuts
     self.defaults = defaults
     self.onOpenSettings = onOpenSettings
@@ -186,6 +190,7 @@ public final class SpotlightWindowController {
     observeFuzzyPreview()
     observePanelWidth()
     installVimCommandRunner()
+    observers.append(contentsOf: installHistoryHooks())
     Task { [session] in await session.bootstrap() }
   }
 
@@ -431,6 +436,7 @@ public final class SpotlightWindowController {
   }
 
   public func close() {
+    session.checkpointHistory()
     if fuzzyController.isVisible { fuzzyController.close() }
     fuzzyPreviewPanel?.orderOut(nil)
     if let panel, panel.isVisible { persistHUDPosition(of: panel) }
@@ -524,6 +530,7 @@ public final class SpotlightWindowController {
         command: commandController,
         copy: copyController,
         vimController: vimController,
+        history: historyController,
         onHeightChange: { [weak self] height in
           self?.setPanelHeight(height, animated: false)
         },
@@ -790,6 +797,7 @@ extension SpotlightWindowController {
       }
     }
     let resolved = MainActor.assumeIsolated { shortcuts.match(key: chars, modifiers: mods) }
+    if handleHistoryPaletteKey(event, action: resolved) { return true }
     guard let action = resolved else { return false }
     if action == .toggleHotkey || action == .appendToLastNote { return false }
     if MainActor.assumeIsolated({ commandController.isVisible }) {
@@ -880,7 +888,13 @@ extension SpotlightWindowController {
 
   // #lizard forgives
   private func dispatch(_ action: ShortcutAction) {
+    if action != .versionHistory, !isHUDMove(action) { historyController.close() }
     switch action {
+    case .versionHistory:
+      if findController.isVisible { findController.close() }
+      if fuzzyController.isVisible { fuzzyController.close() }
+      if commandController.isVisible { commandController.close() }
+      toggleHistoryPalette()
     case .moveHUDLeft, .moveHUDRight, .moveHUDDown, .moveHUDUp:
       moveHUD(action)
     case .newChat, .olderChat, .newerChat, .deleteChat, .undoDelete:
@@ -978,7 +992,7 @@ extension SpotlightWindowController {
     HUDPositionStore.save(position, to: defaults)
   }
 
-  private func editorTextView() -> PlaceholderTextView? {
+  func editorTextView() -> PlaceholderTextView? {
     findEditorTextView(in: panel?.contentView)
   }
 

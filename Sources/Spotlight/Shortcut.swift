@@ -129,6 +129,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
   case moveHUDRight
   case moveHUDDown
   case moveHUDUp
+  case versionHistory
 
   public var id: String { rawValue }
 
@@ -156,6 +157,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .moveHUDRight: return "Move HUD right"
     case .moveHUDDown: return "Move HUD down"
     case .moveHUDUp: return "Move HUD up"
+    case .versionHistory: return "Version history"
     }
   }
 
@@ -184,6 +186,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .moveHUDRight: return "Shift the HUD right on the current screen."
     case .moveHUDDown: return "Shift the HUD down on the current screen."
     case .moveHUDUp: return "Shift the HUD up on the current screen."
+    case .versionHistory: return "Browse and restore earlier versions of the current note."
     }
   }
 
@@ -211,6 +214,7 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable, Identifiabl
     case .moveHUDRight: return Shortcut(key: "rightarrow", modifiers: [.command, .option])
     case .moveHUDDown: return Shortcut(key: "downarrow", modifiers: [.command, .option])
     case .moveHUDUp: return Shortcut(key: "uparrow", modifiers: [.command, .option])
+    case .versionHistory: return Shortcut(key: "y", modifiers: [.command])
     }
   }
 }
