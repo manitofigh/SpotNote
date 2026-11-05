@@ -5,60 +5,49 @@ import Foundation
 /// inside a large pasted chunk) never trigger a synchronous file write.
 /// Large buffers still round-trip through a single atomic write per
 /// window rather than a write per character.
+///
+/// Disk I/O is delegated to a `ChatStorageBackend`: the built-in JSON
+/// directory, or a user-chosen Markdown folder (see `StorageConfiguration`
+/// and the storage-location extension at the end of this file).
 public actor ChatStore {
-  private let directory: URL
+  private var configuration: StorageConfiguration
   private let debounce: Duration
+  private let now: @Sendable () -> Date
+  private var backend: any ChatStorageBackend
   private var chats: [UUID: Chat] = [:]
   private var pendingWrites: [UUID: Task<Void, Never>] = [:]
+  /// Set when a Markdown-folder write failed and the note was saved to the
+  /// built-in directory instead (see `persistNow`).
+  private var hasFallbackWrites = false
 
-  public init(directory: URL, debounce: Duration = .milliseconds(300)) throws {
-    try FileManager.default.createDirectory(
-      at: directory,
-      withIntermediateDirectories: true
-    )
-    self.directory = directory
+  /// - Parameter now: clock for `createdAt` / `updatedAt` and conflict
+  ///   names; injectable for tests.
+  /// - Throws: `MarkdownFolderError.folderUnavailable` (or the listing
+  ///   error) when `configuration.markdownFolder` cannot be read. Callers
+  ///   fall back to the built-in directory.
+  public init(
+    configuration: StorageConfiguration,
+    debounce: Duration = .milliseconds(300),
+    now: @escaping @Sendable () -> Date = { Date() }
+  ) throws {
+    var backend = try Self.makeBackend(for: configuration)
+    self.chats = try backend.loadAll()
+    self.backend = backend
+    self.configuration = configuration
     self.debounce = debounce
-    self.chats = Self.loadAll(from: directory)
+    self.now = now
   }
 
-  /// Default on-disk location for saved chats.
-  ///
-  /// Sandboxed production builds store this under the app container.
-  /// Unsandboxed local debug builds prefer that same container when it
-  /// already exists, so debug and production inspect the same notes.
-  public static func defaultDirectory() throws -> URL {
-    let container = productionContainerDirectory()
-    if FileManager.default.fileExists(atPath: container.path) {
-      return container
-    }
-    return try standardDirectory()
-  }
-
-  private static func standardDirectory() throws -> URL {
-    let appSupport = try FileManager.default.url(
-      for: .applicationSupportDirectory,
-      in: .userDomainMask,
-      appropriateFor: nil,
-      create: true
-    )
-    return chatsDirectory(in: appSupport)
-  }
-
-  private static func productionContainerDirectory() -> URL {
-    let home = FileManager.default.homeDirectoryForCurrentUser
-    return
-      home
-      .appending(path: "Library/Containers", directoryHint: .isDirectory)
-      .appending(path: AppInfo.bundleIdentifier, directoryHint: .isDirectory)
-      .appending(path: "Data/Library/Application Support", directoryHint: .isDirectory)
-      .appending(path: "SpotNote", directoryHint: .isDirectory)
-      .appending(path: "Chats", directoryHint: .isDirectory)
-  }
-
-  private static func chatsDirectory(in appSupport: URL) -> URL {
-    appSupport
-      .appending(path: "SpotNote", directoryHint: .isDirectory)
-      .appending(path: "Chats", directoryHint: .isDirectory)
+  /// Built-in storage only. Not a delegating init: lizard misparses
+  /// `self.init(...)` as a 200-line function.
+  public init(directory: URL, debounce: Duration = .milliseconds(300)) throws {
+    let configuration = StorageConfiguration(builtInDirectory: directory)
+    var backend = try Self.makeBackend(for: configuration)
+    self.chats = try backend.loadAll()
+    self.backend = backend
+    self.configuration = configuration
+    self.debounce = debounce
+    self.now = { Date() }
   }
 
   /// All chats -- pinned first, then unpinned, each group sorted by
@@ -76,8 +65,8 @@ public actor ChatStore {
   /// on disk before the caller takes further action (e.g. switching the
   /// UI to it).
   public func create() throws -> Chat {
-    let now = Date()
-    let chat = Chat(id: UUID(), createdAt: now, updatedAt: now, text: "")
+    let date = now()
+    let chat = Chat(id: UUID(), createdAt: date, updatedAt: date, text: "")
     // Persist before inserting so a failed write doesn't leave a ghost
     // chat that is listed in memory but vanishes on next launch.
     try persistNow(chat)
@@ -95,7 +84,7 @@ public actor ChatStore {
     // reshuffling the note order.
     guard var chat = chats[id], chat.text != text else { return }
     chat.text = text
-    chat.updatedAt = Date()
+    chat.updatedAt = now()
     chats[id] = chat
     scheduleWrite(id: id)
   }
@@ -134,10 +123,7 @@ public actor ChatStore {
     pendingWrites[id]?.cancel()
     pendingWrites[id] = nil
     chats[id] = nil
-    let url = fileURL(for: id)
-    if FileManager.default.fileExists(atPath: url.path) {
-      try FileManager.default.removeItem(at: url)
-    }
+    try backend.remove(id: id)
   }
 
   /// Awaits every pending debounced write. Call before app termination
@@ -153,30 +139,11 @@ public actor ChatStore {
       pendingWrites[id]?.cancel()
       pendingWrites[id] = nil
       guard let chat = chats[id] else { continue }
-      try? persistNow(chat)
+      persistLogged(chat)
     }
   }
 
   // MARK: - Private
-
-  /// Nonisolated so it can run during `init` before `self` is fully
-  /// established on the actor.
-  private static func loadAll(from directory: URL) -> [UUID: Chat] {
-    let urls =
-      (try? FileManager.default.contentsOfDirectory(
-        at: directory,
-        includingPropertiesForKeys: nil
-      )) ?? []
-    let decoder = JSONDecoder()
-    var result: [UUID: Chat] = [:]
-    for url in urls where url.pathExtension == "json" {
-      guard let data = try? Data(contentsOf: url),
-        let chat = try? decoder.decode(Chat.self, from: data)
-      else { continue }
-      result[chat.id] = chat
-    }
-    return result
-  }
 
   private func scheduleWrite(id: UUID) {
     pendingWrites[id]?.cancel()
@@ -190,14 +157,42 @@ public actor ChatStore {
   private func performDebouncedWrite(id: UUID) {
     pendingWrites[id] = nil
     guard let chat = chats[id] else { return }
-    try? persistNow(chat)
+    persistLogged(chat)
   }
 
+  /// Debounced / flushed writes have no caller to report to; the edit
+  /// stays in memory and is retried by the next edit or flush.
+  private func persistLogged(_ chat: Chat) {
+    do {
+      try persistNow(chat)
+    } catch {
+      StorageLog.logger.error("saving note \(chat.id, privacy: .public) failed: \(error, privacy: .public)")
+    }
+  }
+
+  /// Single funnel for every write. In Markdown-folder mode an external
+  /// edit displaced by this write is kept as a conflict copy, and a failed
+  /// write (folder went offline mid-session) falls back to the built-in
+  /// directory so the edit is never lost.
   private func persistNow(_ chat: Chat) throws {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    let data = try encoder.encode(chat)
-    try data.write(to: fileURL(for: chat.id), options: .atomic)
+    do {
+      if let displaced = try backend.write(chat, conflictStamp: nil), displaced.text != chat.text {
+        try saveConflictCopy(of: displaced)
+      }
+    } catch  where configuration.markdownFolder != nil {
+      StorageLog.logger.error("folder write failed, saving to built-in storage: \(error, privacy: .public)")
+      _ = try JSONChatDirectory(directory: configuration.builtInDirectory).write(chat, conflictStamp: nil)
+      hasFallbackWrites = true
+    }
+  }
+
+  /// Keeps `version` as a separate, clearly named note so neither side of
+  /// a conflicting edit is lost.
+  private func saveConflictCopy(of version: Chat) throws {
+    let date = now()
+    let copy = Chat(createdAt: version.createdAt, updatedAt: date, text: version.text)
+    _ = try backend.write(copy, conflictStamp: MarkdownFileName.conflictStamp(for: date))
+    chats[copy.id] = copy
   }
 
   private func uniqueImportedChat(from chat: Chat) -> Chat {
@@ -210,8 +205,150 @@ public actor ChatStore {
       isPinned: chat.isPinned
     )
   }
+}
 
-  private func fileURL(for id: UUID) -> URL {
-    directory.appending(path: "\(id.uuidString).json", directoryHint: .notDirectory)
+// MARK: - Storage location
+
+extension ChatStore {
+  public var isUsingMarkdownFolder: Bool { configuration.markdownFolder != nil }
+
+  /// Makes `folder` the primary storage. The notes currently in the
+  /// library are COPIED into it (see `PortSummary`); the built-in JSON
+  /// directory is never modified, so it remains a backup. Re-enabling the
+  /// same folder is idempotent: notes already there (by id) are skipped.
+  public func useMarkdownFolder(_ folder: URL) async throws -> PortSummary {
+    await flush()
+    let source = Array(chats.values)
+    var markdown = try MarkdownChatFolder(folder: folder)
+    let folderChats = try markdown.loadAll()
+    let previous = (backend, chats, configuration)
+    backend = markdown
+    chats = folderChats
+    configuration.markdownFolder = folder
+    do {
+      return try port(source)
+    } catch {
+      (backend, chats, configuration) = previous
+      throw error
+    }
+  }
+
+  /// Returns to the built-in JSON directory. With `copyingFolderNotes`,
+  /// notes from the folder that are new, or newer than their built-in
+  /// copy, are written into the built-in directory first. The folder
+  /// itself is left untouched either way.
+  /// - Returns: the number of notes copied.
+  @discardableResult
+  public func useBuiltInStorage(copyingFolderNotes: Bool) async throws -> Int {
+    await flush()
+    guard isUsingMarkdownFolder else { return 0 }
+    let json = try JSONChatDirectory(directory: configuration.builtInDirectory)
+    var builtIn = json.loadAll()
+    var copied = 0
+    if copyingFolderNotes {
+      for chat in chats.values {
+        if let existing = builtIn[chat.id], existing.text == chat.text || existing.updatedAt >= chat.updatedAt {
+          continue
+        }
+        _ = try json.write(chat, conflictStamp: nil)
+        builtIn[chat.id] = chat
+        copied += 1
+      }
+    }
+    backend = json
+    chats = builtIn
+    configuration.markdownFolder = nil
+    return copied
+  }
+
+  /// Re-runs the port from the built-in directory into the active folder.
+  /// Used after a session that had to fall back to built-in storage, so
+  /// edits made meanwhile reach the folder (as conflict copies when the
+  /// folder's version also changed).
+  public func copyBuiltInNotesIntoFolder() throws -> PortSummary {
+    guard isUsingMarkdownFolder else { return PortSummary() }
+    let source = try JSONChatDirectory(directory: configuration.builtInDirectory).loadAll()
+    return try port(Array(source.values))
+  }
+
+  /// True once (then reset) if any write had to fall back to the built-in
+  /// directory because the folder was unavailable.
+  public func takeFallbackWrites() -> Bool {
+    defer { hasFallbackWrites = false }
+    return hasFallbackWrites
+  }
+
+  /// Picks up files added, edited, renamed or deleted by other processes.
+  /// Only files whose mtime or size changed are re-read. A note with an
+  /// unsaved local edit keeps that edit; the external version becomes a
+  /// conflict copy. A note deleted externally while it has an unsaved edit
+  /// is re-created by the pending write.
+  /// - Returns: whether the library changed.
+  /// - Throws: when the folder cannot be listed; nothing is removed then.
+  public func rescan() throws -> Bool {
+    let changes = try backend.rescan(known: chats)
+    guard !changes.isEmpty else { return false }
+    for disk in changes.upserted {
+      guard pendingWrites[disk.id] != nil, let local = chats[disk.id] else {
+        chats[disk.id] = disk
+        continue
+      }
+      if local.text != disk.text { try saveConflictCopy(of: disk) }
+    }
+    for id in changes.removed where pendingWrites[id] == nil {
+      chats[id] = nil
+    }
+    return true
+  }
+
+  /// Imports notes, skipping any whose text (ignoring trailing whitespace
+  /// and line-ending style) already exists in the library or earlier in
+  /// `incoming`. Importing the same folder twice therefore adds nothing
+  /// the second time; a file edited in between imports as a new note.
+  /// - Complexity: O(total text size) for hashing.
+  public func importNewChats(_ incoming: [Chat]) throws -> ImportSummary {
+    var seen = Set(chats.values.map { ContentDigest.of($0.text) })
+    var summary = ImportSummary()
+    for chat in incoming {
+      let digest = ContentDigest.of(chat.text)
+      guard !ContentDigest.isBlank(chat.text), seen.insert(digest).inserted else {
+        summary.duplicates += 1
+        continue
+      }
+      let resolved = uniqueImportedChat(from: chat)
+      try persistNow(resolved)
+      chats[resolved.id] = resolved
+      summary.inserted.append(resolved)
+    }
+    return summary
+  }
+
+  private static func makeBackend(for configuration: StorageConfiguration) throws -> any ChatStorageBackend {
+    if let folder = configuration.markdownFolder {
+      return try MarkdownChatFolder(folder: folder)
+    }
+    return try JSONChatDirectory(directory: configuration.builtInDirectory)
+  }
+
+  /// Copy rule: new id -> copy; same id and same text, or the folder's
+  /// version is at least as new -> skip; otherwise -> conflict copy.
+  /// Never overwrites a file in the folder.
+  private func port(_ source: [Chat]) throws -> PortSummary {
+    var summary = PortSummary()
+    for chat in source.sorted(by: { $0.createdAt < $1.createdAt }) {
+      guard let existing = chats[chat.id] else {
+        _ = try backend.write(chat, conflictStamp: nil)
+        chats[chat.id] = chat
+        summary.copied += 1
+        continue
+      }
+      if existing.text == chat.text || chat.updatedAt <= existing.updatedAt {
+        summary.skipped += 1
+      } else {
+        try saveConflictCopy(of: chat)
+        summary.conflictCopies += 1
+      }
+    }
+    return summary
   }
 }

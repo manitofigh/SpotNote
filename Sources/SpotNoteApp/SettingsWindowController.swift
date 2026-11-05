@@ -10,17 +10,20 @@ final class SettingsWindowController {
   private let preferences: ThemePreferences
   private let shortcuts: ShortcutStore
   private let store: ChatStore
+  private let storage: StorageLocationController
   private let onLibraryChanged: @MainActor () -> Void
 
   init(
     preferences: ThemePreferences,
     shortcuts: ShortcutStore,
     store: ChatStore,
+    storage: StorageLocationController,
     onLibraryChanged: @escaping @MainActor () -> Void
   ) {
     self.preferences = preferences
     self.shortcuts = shortcuts
     self.store = store
+    self.storage = storage
     self.onLibraryChanged = onLibraryChanged
   }
 
@@ -60,6 +63,7 @@ final class SettingsWindowController {
         preferences: preferences,
         shortcuts: shortcuts,
         store: store,
+        storage: storage,
         onLibraryChanged: onLibraryChanged
       )
     )

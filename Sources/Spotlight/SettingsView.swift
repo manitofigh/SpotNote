@@ -7,6 +7,7 @@ public struct SettingsView: View {
   @ObservedObject var preferences: ThemePreferences
   @ObservedObject var shortcuts: ShortcutStore
   let store: ChatStore
+  @ObservedObject var storage: StorageLocationController
   let onLibraryChanged: @MainActor () -> Void
   @State private var selection: SettingsSection = .general
   @State private var sidebarCollapsed = false
@@ -17,11 +18,13 @@ public struct SettingsView: View {
     preferences: ThemePreferences,
     shortcuts: ShortcutStore,
     store: ChatStore,
+    storage: StorageLocationController,
     onLibraryChanged: @escaping @MainActor () -> Void
   ) {
     self.preferences = preferences
     self.shortcuts = shortcuts
     self.store = store
+    self.storage = storage
     self.onLibraryChanged = onLibraryChanged
   }
 
@@ -117,6 +120,7 @@ public struct SettingsView: View {
         case .theme: ThemePane(preferences: preferences)
         case .shortcuts: ShortcutsPane(shortcuts: shortcuts)
         case .importExport: ImportExportPane(store: store, onLibraryChanged: onLibraryChanged)
+        case .storage: StoragePane(storage: storage, store: store, onLibraryChanged: onLibraryChanged)
         case .updates: UpdatesPane()
         }
       }
@@ -137,6 +141,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
   case theme
   case shortcuts
   case importExport
+  case storage
   case updates
 
   var id: String { rawValue }
@@ -149,6 +154,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case .theme: return "Theme"
     case .shortcuts: return "Shortcuts"
     case .importExport: return "Import / Export"
+    case .storage: return "Storage"
     case .updates: return "Updates"
     }
   }
@@ -161,6 +167,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case .theme: return "paintpalette"
     case .shortcuts: return "keyboard"
     case .importExport: return "tray.and.arrow.down"
+    case .storage: return "externaldrive"
     case .updates: return "arrow.down.circle"
     }
   }
@@ -173,6 +180,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case .theme: return Color(red: 0.85, green: 0.50, blue: 0.90)
     case .shortcuts: return Color(red: 0.95, green: 0.65, blue: 0.30)
     case .importExport: return Color(red: 0.45, green: 0.70, blue: 0.88)
+    case .storage: return Color(red: 0.55, green: 0.60, blue: 0.95)
     case .updates: return Color(red: 0.30, green: 0.75, blue: 0.50)
     }
   }

@@ -427,10 +427,11 @@ public final class SpotlightWindowController {
     session.unsavedSnapshot()
   }
 
-  public func reloadLibrary() {
+  /// - Parameter pushingLiveText: see `ChatSession.reload(pushingLiveText:)`.
+  public func reloadLibrary(pushingLiveText: Bool = true) {
     Task { @MainActor [weak self] in
       guard let self else { return }
-      await self.session.reload()
+      await self.session.reload(pushingLiveText: pushingLiveText)
       self.fuzzyController.updateCorpus(self.session.chats)
     }
   }

@@ -14,10 +14,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     preferences: preferences,
     shortcuts: shortcutStore,
     store: chatStore,
+    storage: storage,
     onLibraryChanged: { [weak self] in self?.handleLibraryChangedFromSettings() }
   )
+  private lazy var storage = StorageLocationController()
   private lazy var chatStore: ChatStore = {
-    if let store = try? ChatStore(directory: ChatStore.defaultDirectory()) {
+    if let store = makeConfiguredChatStore() {
       return store
     }
     let fallback = FileManager.default.temporaryDirectory.appending(
@@ -120,10 +122,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
       .store(in: &cancellables)
 
+    observeStorageChanges()
+
     let didPresentOnboarding = presentOnboardingIfNeeded()
     if !didPresentOnboarding && !Self.wasLaunchedAsBackgroundItem {
       spotlight.openHUD()
     }
+  }
+
+  /// Opens the store at the user's chosen location. A Markdown folder that
+  /// can't be opened falls back to built-in storage (the controller shows
+  /// why); nil only if even built-in storage is unreachable.
+  private func makeConfiguredChatStore() -> ChatStore? {
+    let builtIn: URL
+    do {
+      builtIn = try ChatStore.defaultDirectory()
+    } catch {
+      NSLog("SpotNote: built-in storage unavailable: \(error)")
+      return nil
+    }
+    let configuration = storage.launchConfiguration(builtInDirectory: builtIn)
+    do {
+      return try ChatStore(configuration: configuration)
+    } catch {
+      if configuration.markdownFolder != nil { storage.reportLaunchFailure(error) }
+      do {
+        return try ChatStore(directory: builtIn)
+      } catch {
+        NSLog("SpotNote: built-in storage unavailable: \(error)")
+        return nil
+      }
+    }
+  }
+
+  /// Picks up notes changed by other apps / devices (folder mode) each
+  /// time SpotNote becomes active, and reloads the HUD if anything moved.
+  private func observeStorageChanges() {
+    NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.syncStorage() }
+    }
+    syncStorage()
+    if let issue = storage.issue { presentStorageIssue(issue) }
+  }
+
+  private func syncStorage() {
+    let store = chatStore
+    // Save the live editor text before rescanning so an unsaved edit goes
+    // through the store's conflict handling instead of being re-pushed
+    // over an external edit by the reload afterwards.
+    let unsaved = spotlight.unsavedEditorSnapshot()
+    Task { @MainActor [weak self] in
+      if let unsaved { await store.update(id: unsaved.id, text: unsaved.text) }
+      guard let self, await self.storage.sync(store: store) else { return }
+      self.spotlight.reloadLibrary(pushingLiveText: false)
+    }
+  }
+
+  private func presentStorageIssue(_ issue: String) {
+    let alert = NSAlert()
+    alert.messageText = "Notes folder unavailable"
+    alert.informativeText = issue
+    alert.addButton(withTitle: "Open Settings")
+    alert.addButton(withTitle: "OK")
+    if alert.runModal() == .alertFirstButtonReturn { showSettings() }
   }
 
   private func presentOnboardingIfNeeded() -> Bool {

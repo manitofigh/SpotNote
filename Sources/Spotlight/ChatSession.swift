@@ -81,10 +81,13 @@ final class ChatSession: ObservableObject {
     }
   }
 
-  func reload() async {
+  /// - Parameter pushingLiveText: false after the store adopted external
+  ///   edits (folder rescan) -- the caller already saved the live text,
+  ///   and re-pushing it would overwrite the external version.
+  func reload(pushingLiveText: Bool = true) async {
     // A keystroke's save runs in an unstructured task; push the live text
     // first so reloading can't replace it with an older stored copy.
-    if let id = currentID { await store.update(id: id, text: currentText) }
+    if pushingLiveText, let id = currentID { await store.update(id: id, text: currentText) }
     await store.flush()
     chats = await store.list()
     if let id = currentID, let current = chats.first(where: { $0.id == id }) {

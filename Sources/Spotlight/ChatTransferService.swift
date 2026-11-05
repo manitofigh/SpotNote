@@ -182,27 +182,3 @@ enum ChatTransferService {
   }
 
 }
-
-enum MarkdownNoteCodec {
-  static func encode(_ text: String) -> String {
-    text
-      .replacingOccurrences(of: "☐", with: "[ ]")
-      .replacingOccurrences(of: "☑", with: "[x]")
-  }
-
-  static func decode(_ markdown: String) -> String {
-    // `String(contentsOf:encoding: .utf8)` keeps a leading byte-order
-    // mark (common in files saved by Windows editors); drop it so the
-    // imported note doesn't start with an invisible U+FEFF.
-    var unmarked = markdown
-    if unmarked.unicodeScalars.first == "\u{FEFF}" {
-      unmarked = String(unmarked.unicodeScalars.dropFirst())
-    }
-    return
-      unmarked
-      .replacingOccurrences(of: "\r\n", with: "\n")
-      .replacingOccurrences(of: "\r", with: "\n")
-      .replacingOccurrences(of: "[x]", with: "☑", options: .caseInsensitive)
-      .replacingOccurrences(of: "[ ]", with: "☐")
-  }
-}
