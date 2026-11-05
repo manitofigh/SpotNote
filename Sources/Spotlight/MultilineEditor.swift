@@ -1085,6 +1085,7 @@ final class PlaceholderTextView: NSTextView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    if openLinkIfCommandClicked(event) { return }
     let point = convert(event.locationInWindow, from: nil)
     let containerPoint = NSPoint(
       x: point.x - textContainerOrigin.x,
