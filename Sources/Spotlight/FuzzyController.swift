@@ -93,7 +93,7 @@ final class FuzzyController: ObservableObject {
     pendingSearch = Task { [weak self] in
       do { try await Task.sleep(for: delay) } catch { return }
       let computed = await Task.detached(priority: .userInitiated) {
-        FuzzyController.rank(query: needle, in: snapshot, limit: limit)
+        await FuzzyTagSearch.rank(query: needle, in: snapshot, limit: limit)
       }.value
       guard !Task.isCancelled else { return }
       await MainActor.run {

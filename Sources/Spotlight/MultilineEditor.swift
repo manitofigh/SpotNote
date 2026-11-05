@@ -410,6 +410,7 @@ struct MultilineEditor: NSViewRepresentable {
 
   func applyCodeStyling(on textView: NSTextView) {
     CodeStyler.apply(to: textView, theme: theme)
+    TagStyler.apply(to: textView, theme: theme)
   }
 
   /// Switches between soft-wrapping (container tracks the view width) and
