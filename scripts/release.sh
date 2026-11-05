@@ -86,12 +86,11 @@ if [[ -z "$TEAM_ID" ]]; then
   exit 1
 fi
 
-if [[ ! -d "$PROJECT_PATH" ]]; then
-  echo "Xcode project not found at $PROJECT_PATH"
-  echo "Generating with xcodegen..."
-  require_cmd xcodegen
-  xcodegen generate
-fi
+# Always regenerate: the project is gitignored, so a copy left over from an
+# earlier release would be missing any source files added since.
+echo "Generating Xcode project with xcodegen..."
+require_cmd xcodegen
+xcodegen generate
 
 for required_file in "$SIGNING_XCCONFIG" "$EXPORT_OPTIONS_PLIST"; do
   if [[ ! -f "$required_file" ]]; then
