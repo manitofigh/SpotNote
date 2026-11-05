@@ -184,7 +184,7 @@ enum MarkdownPreviewStyler {
       case .heading(let level): headings[level, default: IndexSet()].insert(integersIn: range)
       case .bold: bold.insert(integersIn: range)
       case .italic, .blockquote: italic.insert(integersIn: range)
-      case .strikethrough, .link, .blockMarker: break
+      case .strikethrough, .link, .blockMarker, .escape: break
       }
     }
     // A heading's size wins over any emphasis inside it.
@@ -249,7 +249,7 @@ enum MarkdownPreviewStyler {
     muted: NSColor
   ) -> [NSAttributedString.Key: Any] {
     switch kind {
-    case .heading, .bold, .italic:
+    case .heading, .bold, .italic, .escape:
       return [:]
     case .strikethrough:
       return [.strikethroughStyle: NSUnderlineStyle.single.rawValue, .foregroundColor: muted]

@@ -22,6 +22,16 @@ struct MarkdownSpanParserTests {
     #expect(span.markers == [NSRange(location: 0, length: level + 1)])
   }
 
+  @Test("a backslash before a hash is hidden so the hash reads as plain text")
+  func escapedHash() throws {
+    let text = "plain \\#word here"
+    let span = try #require(spans(text).first)
+    #expect(span.kind == .escape)
+    #expect(substring(text, span.content) == "#")
+    #expect(span.markers == [NSRange(location: 6, length: 1)])
+    #expect(spans("`\\#code`").isEmpty)
+  }
+
   @Test(
     "hash followed by a non-space character is a tag, not a heading",
     arguments: ["#tag", "##tag", "#", "####### seven"]

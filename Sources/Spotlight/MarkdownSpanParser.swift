@@ -14,6 +14,9 @@ struct MarkdownSpan: Equatable, Sendable {
     case blockquote
     /// List bullet (`-`, `*`, `+`, `1.`) or blockquote `>`. Tinted, never hidden.
     case blockMarker
+    /// `\#` -- the backslash is hidden so the `#` reads as plain text
+    /// (and is not a tag, see `TagParser`).
+    case escape
   }
 
   let kind: Kind
@@ -43,6 +46,7 @@ enum MarkdownSpanParser {
   private static let headingRegex = regex("^(#{1,6})[ \\t]+(?=\\S)(.*)$")
   private static let quoteRegex = regex("^[ \\t]{0,3}(>)[ \\t]?(.*)$")
   private static let listRegex = regex("^[ \\t]*([-*+]|\\d{1,9}[.)])[ \\t]+(?=\\S)")
+  private static let escapeRegex = regex("\\\\(?=#)")
   private static let linkRegex = regex("(?<!!)\\[([^\\[\\]\\n]+)\\]\\(([^()\\s]+)\\)")
   private static let emphasisRules: [InlineRule] = [
     InlineRule(
@@ -79,6 +83,7 @@ enum MarkdownSpanParser {
     let code = codeCharacters(in: text)
     var claimed = code
     var spans = blockSpans(in: text, code: code)
+    spans += escapeSpans(in: text, claimed: &claimed)
     spans += linkSpans(in: text, claimed: &claimed)
     for rule in emphasisRules {
       spans += emphasisSpans(in: text, rule: rule, claimed: &claimed)
@@ -124,6 +129,17 @@ enum MarkdownSpanParser {
   }
 
   // MARK: - Inline constructs
+
+  private static func escapeSpans(in text: NSString, claimed: inout IndexSet) -> [MarkdownSpan] {
+    let full = NSRange(location: 0, length: text.length)
+    var spans: [MarkdownSpan] = []
+    for match in matches(escapeRegex, in: text, range: full) where !claimed.intersects(nsRange: match.range) {
+      let hash = NSRange(location: match.range.location + 1, length: 1)
+      spans.append(MarkdownSpan(kind: .escape, content: hash, markers: [match.range]))
+      claimed.insert(nsRange: match.range)
+    }
+    return spans
+  }
 
   private static func linkSpans(in text: NSString, claimed: inout IndexSet) -> [MarkdownSpan] {
     let full = NSRange(location: 0, length: text.length)

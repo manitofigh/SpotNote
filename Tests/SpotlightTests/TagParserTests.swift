@@ -40,7 +40,8 @@ struct TagParserTests {
       "```\n#insidefence\n```",
       "```swift\nlet x = 1 // #comment\n```",
       "#",
-      "# "
+      "# ",
+      "escaped \\#plain hash"
     ]
   )
   func ignoresNonTags(text: String) {
