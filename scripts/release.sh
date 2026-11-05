@@ -262,6 +262,8 @@ cat > "$RELEASE_NOTES_PATH" <<HTML
     <li>New: keep your notes as a folder of Markdown files (Settings &gt; Storage), e.g. in iCloud Drive or an Obsidian vault. Your existing notes are copied, never moved. You can also import notes from any folder.</li>
     <li>New: smarter math. <code>100k/2k</code>, variables (<code>rate = 42</code>, then <code>rate * 8</code>), percentages (<code>20% of 150</code>, <code>150 + 10%</code>) and unit conversions (<code>5 km in mi</code>, <code>3h 20m in min</code>, <code>100 F in C</code>).</li>
     <li>New: version history for every note (⌘Y). Browse earlier versions and restore any of them. History is stored compactly.</li>
+    <li>New: ten new themes with distinct colours (Settings &gt; Appearance), from deep blue and forest green to sepia and high-contrast black or white.</li>
+    <li>Fixed: the caret could appear behind the line numbers until you started typing.</li>
   </ul>
   </ul>
 </body>
