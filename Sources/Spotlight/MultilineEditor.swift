@@ -441,7 +441,7 @@ struct MultilineEditor: NSViewRepresentable {
       textView.isHorizontallyResizable = false
       container.widthTracksTextView = true
       textView.maxSize = NSSize(width: unbounded, height: unbounded)
-      let width = scroll.contentSize.width
+      let width = Self.documentWidth(in: scroll)
       if width > 0 {
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
         container.size = NSSize(
@@ -449,14 +449,15 @@ struct MultilineEditor: NSViewRepresentable {
           height: unbounded
         )
       }
-      scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.origin.y))
+      let leadingEdge = -scroll.contentView.contentInsets.left
+      scroll.contentView.scroll(to: NSPoint(x: leadingEdge, y: scroll.contentView.bounds.origin.y))
     } else {
       scroll.hasHorizontalScroller = true
       container.widthTracksTextView = false
       container.size = NSSize(width: unbounded, height: unbounded)
       textView.isHorizontallyResizable = true
       textView.maxSize = NSSize(width: unbounded, height: unbounded)
-      textView.minSize = NSSize(width: scroll.contentSize.width, height: textView.minSize.height)
+      textView.minSize = NSSize(width: Self.documentWidth(in: scroll), height: textView.minSize.height)
       container.exclusionPaths = []
       textView.sizeToFit()
     }
@@ -468,6 +469,17 @@ struct MultilineEditor: NSViewRepresentable {
       layoutManager.ensureLayout(for: container)
     }
     scroll.reflectScrolledClipView(scroll.contentView)
+  }
+
+  /// Width of the clip area right of the line-number gutter. `NSScrollView`
+  /// lays the vertical ruler over the clip view as a left content inset,
+  /// so `contentSize` includes the gutter. Sizing the document to that
+  /// leaves horizontal slack the clip view can scroll into, which slides
+  /// the text -- and the caret on an empty line -- under the gutter until a
+  /// keystroke scrolls the caret back into view.
+  private static func documentWidth(in scroll: NSScrollView) -> CGFloat {
+    let insets = scroll.contentView.contentInsets
+    return scroll.contentSize.width - insets.left - insets.right
   }
 
   private func configureRuler(scroll: NSScrollView, textView: NSTextView, visible: Bool) {
