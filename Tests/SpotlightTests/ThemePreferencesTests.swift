@@ -196,4 +196,13 @@ struct ThemePreferencesTests {
     prefs.focusedBackgroundOpacity = 2.0
     #expect(prefs.focusedBackgroundOpacity == 1.0)
   }
+
+  @Test("markdown preview is off by default and persists when enabled")
+  func markdownPreviewDefaultsOff() {
+    let defaults = makeDefaults()
+    let prefs = ThemePreferences(defaults: defaults)
+    #expect(prefs.markdownPreview == false)
+    prefs.markdownPreview = true
+    #expect(ThemePreferences(defaults: defaults).markdownPreview)
+  }
 }

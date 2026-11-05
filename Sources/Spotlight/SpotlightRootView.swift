@@ -209,6 +209,7 @@ struct SpotlightRootView: View {
       findRevealRequest: find.revealRequest,
       vimModeEnabled: preferences.vimMode,
       wrapLines: preferences.wrapLines,
+      markdownPreviewEnabled: preferences.markdownPreview,
       vimController: vimController,
       onEscape: onEscape,
       onCommitNavigationSelection: session.commitNavigationSelection,

@@ -439,6 +439,17 @@ private struct EditorPane: View {
             set: { preferences.wrapLines = $0 }
           )
         )
+
+        SettingsDivider()
+
+        SettingsToggleRow(
+          title: "Markdown preview",
+          subtitle: "Render headings, emphasis, links and lists. The line you edit shows raw Markdown.",
+          isOn: Binding(
+            get: { preferences.markdownPreview },
+            set: { preferences.markdownPreview = $0 }
+          )
+        )
       }
     }
   }

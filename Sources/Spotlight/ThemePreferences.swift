@@ -19,6 +19,7 @@ public final class ThemePreferences: ObservableObject {
     static let maxVisibleLines = "editor.maxVisibleLines"
     static let panelWidth = "hud.panelWidth"
     static let wrapLines = "editor.wrapLines"
+    static let markdownPreview = "editor.markdownPreview"
     static let showHints = "hud.showTutorial"
     static let vimMode = "editor.vimMode"
     static let showWordCount = "editor.showWordCount"
@@ -141,6 +142,12 @@ public final class ThemePreferences: ObservableObject {
     didSet { defaults.set(wrapLines, forKey: Key.wrapLines) }
   }
 
+  /// Render Markdown inline, showing raw syntax only on the edited line.
+  /// Off by default.
+  @Published public var markdownPreview: Bool {
+    didSet { defaults.set(markdownPreview, forKey: Key.markdownPreview) }
+  }
+
   private let defaults: UserDefaults
 
   public init(defaults: UserDefaults = .standard) {
@@ -170,6 +177,7 @@ public final class ThemePreferences: ObservableObject {
     let storedWidth = defaults.object(forKey: Key.panelWidth) as? Int
     self.panelWidth = Self.clampPanelWidth(storedWidth ?? Self.defaultPanelWidth)
     self.wrapLines = Self.boolOrDefault(defaults, Key.wrapLines, default: true)
+    self.markdownPreview = Self.boolOrDefault(defaults, Key.markdownPreview, default: false)
   }
 
   public static func clampPanelWidth(_ value: Int) -> Int {

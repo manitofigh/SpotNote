@@ -44,6 +44,8 @@ struct MultilineEditor: NSViewRepresentable {
   /// scrolls horizontally (overlay scroller, fades when idle) instead of
   /// soft-wrapping.
   var wrapLines: Bool = true
+  /// Optional Markdown live preview (see `MarkdownPreviewStyler`).
+  var markdownPreviewEnabled: Bool = false
   /// Owning controller used to mirror normal/insert mode into SwiftUI
   /// state, drive the `:` / `/` prompt buffer, and dispatch parsed
   /// commands. `nil` while vim mode is off (the editor short-circuits
@@ -166,6 +168,7 @@ struct MultilineEditor: NSViewRepresentable {
     // it. We only act on a transition so a stable highlight doesn't
     // continually steal the user's caret.
     applyFindHighlight(textView: textView, coordinator: context.coordinator)
+    syncMarkdownPreview(on: textView)
 
     // Re-evaluate the panel height: text (via bindings), `maxVisibleLines`,
     // and `extraChromeHeight` can all change here, and the editor delegate
@@ -267,6 +270,7 @@ struct MultilineEditor: NSViewRepresentable {
     func textViewDidChangeSelection(_ notification: Notification) {
       guard let textView = notification.object as? PlaceholderTextView else { return }
       parent.refreshSuggestion(on: textView)
+      parent.revealMarkdownForSelection(on: textView)
     }
 
     func textDidChange(_ notification: Notification) {
@@ -410,6 +414,12 @@ struct MultilineEditor: NSViewRepresentable {
 
   func applyCodeStyling(on textView: NSTextView) {
     CodeStyler.apply(to: textView, theme: theme)
+    // Order matters: markdown clears underline/strikethrough document-wide,
+    // so links and tags paint after it.
+    applyMarkdownPreview(on: textView)
+    if let layoutManager = textView.layoutManager {
+      LinkStyler.apply(to: layoutManager, text: textView.string as NSString, theme: theme)
+    }
     TagStyler.apply(to: textView, theme: theme)
   }
 
@@ -719,6 +729,7 @@ final class PlaceholderTextView: NSTextView {
   /// glyphs. Keep the editor caret visually consistent instead of allowing
   /// those layout-dependent widths to leak into the renderer.
   private let insertionPointWidth: CGFloat = 1
+  var markdownPreview = MarkdownPreviewState()
 
   var vimModeEnabled: Bool = false {
     didSet {
@@ -1093,6 +1104,7 @@ final class PlaceholderTextView: NSTextView {
       y: point.y - textContainerOrigin.y
     )
     if toggleChecklistAtPoint(containerPoint) { return }
+    if openMarkdownLinkIfNeeded(at: containerPoint, event: event) { return }
     super.mouseDown(with: event)
   }
 
@@ -1835,6 +1847,7 @@ final class FixedLineHeightLayoutManager: NSLayoutManager {
   /// when position 0 holds a Unicode character (e.g. ☐) that triggers
   /// system font substitution and produces wrong ascender metrics.
   var editorFont: NSFont = .systemFont(ofSize: EditorMetrics.fontSize)
+  var markdownGlyphs = MarkdownGlyphVisibility()
 
   override func setLineFragmentRect(
     _ fragmentRect: NSRect,
@@ -1963,24 +1976,27 @@ extension FixedLineHeightLayoutManager: NSLayoutManagerDelegate {
         break
       }
     }
-    guard hasChecked else { return 0 }
+    let hidesMarkdown = markdownGlyphs.hidesAny(charIndexes: charIndexes, count: glyphRange.length)
+    guard hasChecked || hidesMarkdown else { return 0 }
 
     // Resolve ☐'s glyph in the current font so we can reuse it for ☑
     var uncheckedChar: UniChar = 0x2610
     var uncheckedGlyph: CGGlyph = 0
-    guard CTFontGetGlyphsForCharacters(aFont as CTFont, &uncheckedChar, &uncheckedGlyph, 1),
-      uncheckedGlyph != 0
-    else { return 0 }
+    let canSubstitute =
+      hasChecked && CTFontGetGlyphsForCharacters(aFont as CTFont, &uncheckedChar, &uncheckedGlyph, 1)
+      && uncheckedGlyph != 0
+    guard canSubstitute || hidesMarkdown else { return 0 }
 
     var newGlyphs = Array(UnsafeBufferPointer(start: glyphs, count: glyphRange.length))
-    for i in 0..<glyphRange.length {
+    for i in 0..<glyphRange.length where canSubstitute {
       guard charIndexes[i] < nsString.length,
         nsString.character(at: charIndexes[i]) == 0x2611
       else { continue }
       newGlyphs[i] = uncheckedGlyph
     }
 
-    let propsArr = Array(UnsafeBufferPointer(start: props, count: glyphRange.length))
+    var propsArr = Array(UnsafeBufferPointer(start: props, count: glyphRange.length))
+    if hidesMarkdown { markdownGlyphs.hide(properties: &propsArr, charIndexes: charIndexes) }
     let charArr = Array(UnsafeBufferPointer(start: charIndexes, count: glyphRange.length))
     newGlyphs.withUnsafeBufferPointer { gp in
       propsArr.withUnsafeBufferPointer { pp in

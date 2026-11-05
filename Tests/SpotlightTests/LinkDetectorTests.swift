@@ -143,8 +143,14 @@ struct LinkStylerTests {
   private func styledTextView(_ text: String) -> NSTextView {
     let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
     textView.string = text
-    CodeStyler.apply(to: textView, theme: ThemeCatalog.obsidian)
+    restyle(textView)
     return textView
+  }
+
+  private func restyle(_ textView: NSTextView) {
+    CodeStyler.apply(to: textView, theme: ThemeCatalog.obsidian)
+    guard let layoutManager = textView.layoutManager else { return }
+    LinkStyler.apply(to: layoutManager, text: textView.string as NSString, theme: ThemeCatalog.obsidian)
   }
 
   private func linkAttribute(in textView: NSTextView, at index: Int) -> Any? {
@@ -168,7 +174,7 @@ struct LinkStylerTests {
   func clearsStaleStyling() {
     let textView = styledTextView("go https://example.com now")
     textView.string = "go plain words here now"
-    CodeStyler.apply(to: textView, theme: ThemeCatalog.obsidian)
+    restyle(textView)
     #expect(linkAttribute(in: textView, at: 5) == nil)
     let underline = textView.layoutManager?.temporaryAttribute(
       .underlineStyle,

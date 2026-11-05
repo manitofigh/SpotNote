@@ -47,7 +47,6 @@ enum CodeStyler {
       palette: palette,
       processed: processed
     )
-    LinkStyler.apply(to: layoutManager, text: nsText, theme: theme)
   }
 
   // MARK: - Triple fences
