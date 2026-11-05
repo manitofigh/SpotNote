@@ -39,8 +39,11 @@ struct MarkdownPreviewState {
 ///   attributes, like `CodeStyler`.
 /// - Marker hiding is glyph-level (see `MarkdownGlyphVisibility`).
 ///
-/// Every style keeps the editor's point size, so `FixedLineHeightLayoutManager`
-/// still lays every line out at exactly `EditorMetrics.lineHeight`.
+/// Headings `#`–`###` use larger bold fonts; everything else keeps the
+/// editor's point size. `FixedLineHeightLayoutManager` still lays every
+/// line out at exactly `EditorMetrics.lineHeight`, and heading fonts do
+/// not depend on whether the line is revealed, so moving the caret never
+/// changes a line's size.
 @MainActor
 enum MarkdownPreviewStyler {
   private struct Fonts {
@@ -48,6 +51,16 @@ enum MarkdownPreviewStyler {
     let bold: NSFont
     let italic: NSFont
     let boldItalic: NSFont
+    /// Bold, scaled per heading level (index 0 = `#`). Capped so caps and
+    /// descenders still fit `EditorMetrics.lineHeight`: the layout manager
+    /// pins every glyph run to the base font's baseline, so a larger font
+    /// only grows upward into the fragment's spare room and never changes
+    /// line height (see `FixedLineHeightLayoutManager.setLocation`).
+    let headings: [NSFont]
+
+    /// Size multipliers for `#`, `##`, `###`; deeper levels stay bold at
+    /// the base size.
+    private static let headingScales: [CGFloat] = [1.3, 1.18, 1.08]
 
     init(base: NSFont) {
       let manager = NSFontManager.shared
@@ -59,10 +72,15 @@ enum MarkdownPreviewStyler {
       self.bold = bold
       self.italic = manager.convert(base, toHaveTrait: .italicFontMask)
       self.boldItalic = manager.convert(bold, toHaveTrait: .italicFontMask)
+      self.headings = Self.headingScales.map { manager.convert(bold, toSize: (base.pointSize * $0).rounded()) }
+    }
+
+    func heading(level: Int) -> NSFont {
+      level <= headings.count ? headings[max(0, level - 1)] : bold
     }
 
     func isManaged(_ font: NSFont) -> Bool {
-      font == base || font == bold || font == italic || font == boldItalic
+      font == base || font == bold || font == italic || font == boldItalic || headings.contains(font)
     }
   }
 
@@ -159,21 +177,28 @@ enum MarkdownPreviewStyler {
   private static func applyFonts(spans: [MarkdownSpan], to storage: NSTextStorage, fonts: Fonts) -> Bool {
     var bold = IndexSet()
     var italic = IndexSet()
+    var headings: [Int: IndexSet] = [:]
     for span in spans {
       let range = Range(span.content) ?? 0..<0
       switch span.kind {
-      case .heading, .bold: bold.insert(integersIn: range)
+      case .heading(let level): headings[level, default: IndexSet()].insert(integersIn: range)
+      case .bold: bold.insert(integersIn: range)
       case .italic, .blockquote: italic.insert(integersIn: range)
       case .strikethrough, .link, .blockMarker: break
       }
     }
-    let plain = IndexSet(integersIn: 0..<storage.length).subtracting(bold).subtracting(italic)
-    let plan: [(IndexSet, NSFont)] = [
-      (plain, fonts.base),
-      (bold.subtracting(italic), fonts.bold),
-      (italic.subtracting(bold), fonts.italic),
-      (bold.intersection(italic), fonts.boldItalic)
-    ]
+    // A heading's size wins over any emphasis inside it.
+    let headed = headings.values.reduce(into: IndexSet()) { $0.formUnion($1) }
+    bold.subtract(headed)
+    italic.subtract(headed)
+    let plain = IndexSet(integersIn: 0..<storage.length).subtracting(bold).subtracting(italic).subtracting(headed)
+    let plan: [(IndexSet, NSFont)] =
+      headings.map { ($0.value, fonts.heading(level: $0.key)) } + [
+        (plain, fonts.base),
+        (bold.subtracting(italic), fonts.bold),
+        (italic.subtracting(bold), fonts.italic),
+        (bold.intersection(italic), fonts.boldItalic)
+      ]
     var fixes: [(NSRange, NSFont)] = []
     for (set, font) in plan {
       for run in set.rangeView {

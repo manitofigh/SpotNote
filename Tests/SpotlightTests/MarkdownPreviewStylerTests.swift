@@ -59,6 +59,33 @@ struct MarkdownPreviewStylerTests {
     #expect(heights.allSatisfy { $0 == EditorMetrics.lineHeight })
   }
 
+  @Test("heading levels get progressively larger fonts that fit the fixed line")
+  func headingSizes() {
+    let (textView, layoutManager) = makeTextView("# One\n## Two\n### Three\n#### Four\nplain")
+    textView.setSelectedRange(NSRange(location: textView.string.utf16.count, length: 0))
+    _ = MarkdownPreviewStyler.apply(to: textView, theme: ThemeCatalog.obsidian, baseFont: font)
+    let text = textView.string as NSString
+    let sizes = ["One", "Two", "Three", "Four", "plain"].map { word -> CGFloat in
+      let index = text.range(of: word).location
+      return (textView.textStorage?.attribute(.font, at: index, effectiveRange: nil) as? NSFont)?.pointSize ?? 0
+    }
+    #expect(sizes[0] > sizes[1] && sizes[1] > sizes[2] && sizes[2] > sizes[3])
+    #expect(sizes[3] == font.pointSize && sizes[4] == font.pointSize)
+    // Every glyph run sits on the base font's baseline; the largest
+    // heading's caps and descenders must still land inside the fragment.
+    let natural = font.ascender - font.descender
+    let baseline = font.ascender + (EditorMetrics.lineHeight - natural) / 2
+    let largest = NSFontManager.shared.convert(font, toSize: sizes[0])
+    #expect(largest.capHeight <= baseline)
+    #expect(baseline - largest.descender <= EditorMetrics.lineHeight)
+    layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: text.length))
+    var heights: [CGFloat] = []
+    layoutManager.enumerateLineFragments(
+      forGlyphRange: NSRange(location: 0, length: layoutManager.numberOfGlyphs)
+    ) { rect, _, _, _, _ in heights.append(rect.height) }
+    #expect(heights.allSatisfy { $0 == EditorMetrics.lineHeight })
+  }
+
   @Test("styling registers no undo and leaves the text untouched")
   func noUndoNoTextChange() {
     let original = "**a** [l](u)"
