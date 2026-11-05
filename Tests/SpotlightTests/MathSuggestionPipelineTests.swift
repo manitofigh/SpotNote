@@ -160,6 +160,17 @@ struct MathSuggestionPipelineTests {
     #expect(textView.pendingSuggestion == "9")
   }
 
+  @Test("variables from earlier lines and conversions reach the ghost suggestion")
+  func smartMathPipeline() {
+    let text = "rate = 1.5k\nrate * 2"
+    let (editor, textView) = makeHarness(text: text, cursor: (text as NSString).length)
+    editor.refreshSuggestion(on: textView)
+    #expect(textView.pendingSuggestion == "3000")
+    let (convEditor, convView) = makeHarness(text: "2.5 GB to MB", cursor: 12)
+    convEditor.refreshSuggestion(on: convView)
+    #expect(convView.pendingSuggestion == "2500 MB")
+  }
+
   @Test("suggestion hides on empty text")
   func emptyTextHidesSuggestion() {
     let (editor, textView) = makeHarness(text: "", cursor: 0)

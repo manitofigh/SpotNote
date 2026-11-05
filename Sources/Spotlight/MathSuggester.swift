@@ -1,13 +1,20 @@
 import Foundation
 
-/// Detects an arithmetic expression at the tail of a line and computes
-/// its result. Returns the formatted answer in the most "interesting"
-/// base present in the expression -- hex if any operand uses `0x`,
-/// binary for `0b`, octal for `0o`, decimal otherwise.
+/// Detects a calculation at the tail of a line and computes its result.
 ///
-/// Implementation: a small shunting-yard parser (`MathExpression`) over
-/// `+ - * / % ^` with parentheses and decimal/hex/binary/octal
-/// literals. We avoid `NSExpression` because it can't parse
+/// Supported, in order of precedence:
+/// - Unit conversion: `5 km in mi`, `2.5 GB to MB` (see `MathConversion`).
+/// - Arithmetic over `+ - * / % ^` and parentheses with decimal, `0x`,
+///   `0b`, `0o`, and magnitude-suffixed (`1.5k`, `2M`) literals, percent
+///   (`20% of 150`, `150 + 10%`), and variables assigned on earlier lines
+///   of the same note (`rate = 42`; see `MathVariables`).
+///
+/// Integer answers use the most "interesting" base among the literals --
+/// hex if any operand uses `0x`, then binary, then octal, else decimal.
+/// See `MathFormat` for the formatting rules.
+///
+/// Implementation: a small shunting-yard parser (`MathTokenizer` +
+/// `MathExpression`). We avoid `NSExpression` because it can't parse
 /// base-prefixed literals and has quirky handling of `%` inside format
 /// strings.
 enum MathSuggester {
@@ -28,7 +35,7 @@ enum MathSuggester {
   }
 
   struct Result: Equatable {
-    /// Formatted answer string, e.g. `"16"`, `"0x11"`, `"0b1011"`.
+    /// Formatted answer string, e.g. `"16"`, `"0x11"`, `"3.106856 mi"`.
     let answer: String
     /// Length in characters of the trailing substring of the input that
     /// was consumed as the expression -- useful if the caller wants to
@@ -36,375 +43,112 @@ enum MathSuggester {
     let consumed: Int
   }
 
+  /// Longest line tail considered as an expression; bounds the retry
+  /// loop on long prose lines.
+  private static let maxExpressionLength = 200
+
   /// Returns a suggestion when the line ending at `cursorOffset` (a
   /// UTF-16 code unit offset into `text`) ends with a complete
-  /// arithmetic expression. The expression must contain at least one
-  /// operator -- bare numbers don't trigger.
+  /// calculation. Arithmetic must contain at least one binary operator --
+  /// bare numbers don't trigger. Variables come from assignment lines
+  /// above the cursor's line.
   static func suggestion(text: String, cursorOffset: Int) -> Result? {
     let nsText = text as NSString
     let safeOffset = max(0, min(cursorOffset, nsText.length))
-    let prefix = nsText.substring(with: NSRange(location: 0, length: safeOffset))
-    let line = lastLine(of: prefix)
-    return suggestionForLine(line)
+    let newline = nsText.range(of: "\n", options: .backwards, range: NSRange(location: 0, length: safeOffset))
+    let lineStart = newline.location == NSNotFound ? 0 : newline.location + 1
+    let line = nsText.substring(with: NSRange(location: lineStart, length: safeOffset - lineStart))
+    // Only pay for the scan when the line could reference a variable.
+    let mayUseVariables = mayContainOperation(line) && line.contains(where: MathTokenizer.isIdentifierStart)
+    let variables = mayUseVariables ? MathVariables.collect(in: nsText, before: lineStart) : [:]
+    return suggestionForLine(line, variables: variables)
   }
 
-  static func suggestionForLine(_ line: String) -> Result? {
+  static func suggestionForLine(_ line: String, variables: [String: MathValue] = [:]) -> Result? {
+    if let conversion = MathConversion.suggestion(for: line) { return conversion }
     let candidate = trailingExpression(in: line)
     let trimmed = candidate.trimmingCharacters(in: .whitespaces)
-    guard !trimmed.isEmpty else { return nil }
-    guard trimmed.contains(where: { MathExpression.operators.contains($0) }) else { return nil }
-    if let result = tryEvaluate(trimmed) { return result }
-    return retryWithShorterPrefixes(trimmed)
+    guard !trimmed.isEmpty, mayContainOperation(trimmed) else { return nil }
+    if let result = tryEvaluate(trimmed, variables: variables) { return result }
+    return retryWithShorterPrefixes(trimmed, variables: variables)
   }
 
-  private static func tryEvaluate(_ expr: String) -> Result? {
-    guard expr.contains(where: { MathExpression.operators.contains($0) }) else { return nil }
-    // A lone negative literal ("-5") has no binary operator and is not
-    // worth suggesting; require at least one real operation.
-    guard let tokens = MathExpression.tokenize(expr),
+  private static func tryEvaluate(_ expr: String, variables: [String: MathValue]) -> Result? {
+    guard mayContainOperation(expr) else { return nil }
+    // A lone negative literal ("-5") or percentage ("10%") has no binary
+    // operator and is not worth suggesting; require a real operation.
+    guard let tokens = MathTokenizer.tokenize(expr, variables: variables),
       tokens.contains(where: { $0.isBinaryOperator })
     else { return nil }
-    let base = detectBase(in: expr)
     // Overflow (`2^10000`) or domain errors (`(-8)^0.5`) would otherwise
     // render as "∞" / "NaN".
-    guard let value = MathExpression.evaluate(expr), value.isFinite else { return nil }
-    return Result(answer: format(value, base: base), consumed: expr.count)
+    guard let value = MathExpression.evaluate(tokens), value.value.isFinite else { return nil }
+    let answer =
+      value.isPercent
+      ? MathFormat.percent(value.value)
+      : MathFormat.number(value.value, base: detectBase(in: expr))
+    return Result(answer: answer, consumed: expr.count)
+  }
+
+  /// Cheap pre-filter run before tokenizing: an operation needs an
+  /// operator character or the word `of` (`tip of price`).
+  private static func mayContainOperation(_ text: String) -> Bool {
+    text.contains(where: { MathExpression.operators.contains($0) }) || text.contains("of")
   }
 
   /// When the greedy extraction includes stray leading tokens (e.g.
-  /// "9 6+12"), skip forward past each whitespace boundary and retry
-  /// until a valid expression is found.
-  private static func retryWithShorterPrefixes(_ expr: String) -> Result? {
+  /// "9 6+12", "price 100 * 1.08"), skip forward past each whitespace
+  /// boundary and retry until a valid expression is found.
+  private static func retryWithShorterPrefixes(_ expr: String, variables: [String: MathValue]) -> Result? {
     var rest = expr[...]
     while let spaceIdx = rest.firstIndex(where: { $0 == " " || $0 == "\t" }) {
       let afterSpace = rest[spaceIdx...].drop(while: { $0 == " " || $0 == "\t" })
       guard !afterSpace.isEmpty else { break }
       rest = afterSpace
       let sub = String(rest).trimmingCharacters(in: .whitespaces)
-      if let result = tryEvaluate(sub) { return result }
+      if let result = tryEvaluate(sub, variables: variables) { return result }
     }
     return nil
   }
 
   // MARK: - Trailing expression extraction
 
-  private static func lastLine(of text: String) -> String {
-    if let lastNewline = text.lastIndex(of: "\n") {
-      return String(text[text.index(after: lastNewline)...])
-    }
-    return text
-  }
-
   /// Walks back from the end of `line` collecting every character that
-  /// could plausibly belong to an arithmetic expression. The returned
-  /// substring is greedy and may still fail to tokenize -- that's the
-  /// downstream evaluator's job to reject.
+  /// could plausibly belong to an expression (identifiers included, for
+  /// variables, suffixes, and `of`). The returned substring is greedy and
+  /// may still fail to tokenize -- that's the downstream evaluator's job
+  /// to reject.
   private static func trailingExpression(in line: String) -> String {
-    let allowed: Set<Character> = Set(
-      "0123456789abcdefABCDEFxXbBoO+-*/%^()._ \t"
-    )
+    let symbols: Set<Character> = Set("+-*/%^()._ \t")
     var collected: [Character] = []
     for ch in line.reversed() {
-      guard allowed.contains(ch) else { break }
+      guard ch.isASCII, ch.isLetter || ch.isNumber || symbols.contains(ch) else { break }
+      guard collected.count < maxExpressionLength else {
+        // Truncated mid-line: drop the possibly partial leading word.
+        let partial = collected.lastIndex(where: { $0 == " " || $0 == "\t" }) ?? 0
+        collected.removeSubrange(partial...)
+        break
+      }
       collected.append(ch)
     }
     return String(collected.reversed())
   }
 
-  // MARK: - Base detection + formatting
+  // MARK: - Base detection
 
+  /// The most interesting base among `0x` / `0b` / `0o` literals. Only
+  /// prefixes that start a number count, so `10b + 1` (ten billion) stays
+  /// decimal.
   private static func detectBase(in expr: String) -> Base {
-    let lower = expr.lowercased()
-    if lower.contains("0x") { return .hex }
-    if lower.contains("0b") { return .binary }
-    if lower.contains("0o") { return .octal }
+    let chars = Array(expr.lowercased())
+    var found: Set<Character> = []
+    for idx in chars.indices where chars[idx] == "0" && idx + 2 < chars.count {
+      let startsNumber = idx == 0 || !(MathTokenizer.isIdentifierBody(chars[idx - 1]) || chars[idx - 1] == ".")
+      if startsNumber, chars[idx + 2].isHexDigit { found.insert(chars[idx + 1]) }
+    }
+    if found.contains("x") { return .hex }
+    if found.contains("b") { return .binary }
+    if found.contains("o") { return .octal }
     return .decimal
-  }
-
-  private static func format(_ value: Double, base: Base) -> String {
-    let isInt = isIntegral(value)
-    if base == .decimal {
-      return isInt ? String(Int(value)) : shortDecimal(value)
-    }
-    guard isInt else { return shortDecimal(value) }
-    let intValue = Int(value)
-    let absStr = String(abs(intValue), radix: radix(for: base))
-    return (intValue < 0 ? "-" : "") + base.prefix + absStr
-  }
-
-  private static func isIntegral(_ value: Double) -> Bool {
-    value.rounded() == value && abs(value) < 1e15 && !value.isInfinite && !value.isNaN
-  }
-
-  private static func radix(for base: Base) -> Int {
-    switch base {
-    case .hex: return 16
-    case .binary: return 2
-    case .octal: return 8
-    case .decimal: return 10
-    }
-  }
-
-  private static func shortDecimal(_ value: Double) -> String {
-    let formatter = NumberFormatter()
-    formatter.maximumFractionDigits = 6
-    formatter.minimumFractionDigits = 0
-    formatter.usesGroupingSeparator = false
-    // The input grammar only accepts "." as the decimal separator, so the
-    // answer must use it too regardless of the user's locale.
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    return formatter.string(from: NSNumber(value: value)) ?? String(value)
-  }
-}
-
-/// Tokenizer + shunting-yard evaluator for the supported arithmetic
-/// grammar. Lives as a sibling type so neither `MathSuggester` nor this
-/// parser exceeds the project's per-type body-length lint threshold.
-enum MathExpression {
-  static let operators: Set<Character> = ["+", "-", "*", "/", "%", "^"]
-  /// Internal token for prefix negation (`-2`, `3 * -(1 + 1)`).
-  static let unaryMinus: Character = "~"
-
-  static func evaluate(_ expr: String) -> Double? {
-    guard let tokens = tokenize(expr) else { return nil }
-    guard let rpn = shuntingYard(tokens) else { return nil }
-    return evaluateRPN(rpn)
-  }
-
-  enum Token: Equatable {
-    case number(Double)
-    case op(Character)
-    case lparen
-    case rparen
-
-    var isBinaryOperator: Bool {
-      if case .op(let op) = self { return op != MathExpression.unaryMinus }
-      return false
-    }
-  }
-
-  // MARK: Tokenize
-
-  // #lizard forgives
-  // swiftlint:disable:next cyclomatic_complexity
-  static func tokenize(_ expr: String) -> [Token]? {
-    var tokens: [Token] = []
-    let chars = Array(expr)
-    var idx = 0
-    while idx < chars.count {
-      let ch = chars[idx]
-      if ch.isWhitespace {
-        idx += 1
-        continue
-      }
-      if let parsed = parseNumber(chars, at: idx) {
-        if case .number = tokens.last { return nil }
-        if case .rparen = tokens.last { return nil }
-        tokens.append(.number(parsed.value))
-        idx = parsed.next
-        continue
-      }
-      if let symbol = symbolToken(ch) {
-        // swiftlint:disable opening_brace
-        if case .op(let op) = symbol, op == "-" || op == "+",
-          isUnaryPosition(after: tokens.last),
-          idx + 1 < chars.count, !chars[idx + 1].isWhitespace
-        {
-          // swiftlint:enable opening_brace
-          // Prefix sign glued to its operand. A sign followed by a space
-          // ("- 2 + 2", a markdown bullet) stays binary and is rejected,
-          // letting the retry path evaluate the rest of the line.
-          if op == "-" { tokens.append(.op(unaryMinus)) }
-          idx += 1
-          continue
-        }
-        if case .lparen = symbol {
-          if case .number = tokens.last { return nil }
-          if case .rparen = tokens.last { return nil }
-        }
-        tokens.append(symbol)
-        idx += 1
-        continue
-      }
-      return nil
-    }
-    return tokens.isEmpty ? nil : tokens
-  }
-
-  private static func isUnaryPosition(after previous: Token?) -> Bool {
-    switch previous {
-    case nil, .op, .lparen: return true
-    case .number, .rparen: return false
-    }
-  }
-
-  private static func symbolToken(_ ch: Character) -> Token? {
-    if operators.contains(ch) { return .op(ch) }
-    if ch == "(" { return .lparen }
-    if ch == ")" { return .rparen }
-    return nil
-  }
-
-  private static func parseNumber(_ chars: [Character], at start: Int) -> (value: Double, next: Int)? {
-    if let parsed = parsePrefixedInt(chars, at: start) { return parsed }
-    return parseDecimal(chars, at: start)
-  }
-
-  private static func parsePrefixedInt(_ chars: [Character], at start: Int) -> (value: Double, next: Int)? {
-    guard start + 1 < chars.count, chars[start] == "0" else { return nil }
-    let radix: Int
-    let allowed: (Character) -> Bool
-    switch chars[start + 1] {
-    case "x", "X":
-      radix = 16
-      allowed = { $0.isHexDigit }
-    case "b", "B":
-      radix = 2
-      allowed = { $0 == "0" || $0 == "1" }
-    case "o", "O":
-      radix = 8
-      allowed = { ("0"..."7").contains($0) }
-    default:
-      return nil
-    }
-    var end = start + 2
-    while end < chars.count, allowed(chars[end]) { end += 1 }
-    guard end > start + 2 else { return nil }
-    guard let value = Int(String(chars[(start + 2)..<end]), radix: radix) else { return nil }
-    return (Double(value), end)
-  }
-
-  private static func parseDecimal(_ chars: [Character], at start: Int) -> (value: Double, next: Int)? {
-    var end = start
-    var sawDigit = false
-    var sawDot = false
-    while end < chars.count {
-      let ch = chars[end]
-      if ch.isNumber {
-        sawDigit = true
-        end += 1
-        continue
-      }
-      if ch == ".", !sawDot {
-        sawDot = true
-        end += 1
-        continue
-      }
-      break
-    }
-    guard sawDigit, let value = Double(String(chars[start..<end])) else { return nil }
-    return (value, end)
-  }
-
-  // MARK: Shunting yard
-
-  private static func precedence(_ op: Character) -> Int {
-    switch op {
-    case "+", "-": return 1
-    case "*", "/", "%": return 2
-    // Negation binds tighter than * / % but looser than ^, so
-    // `-2^2 == -4` and `2^-1 == 0.5`.
-    case unaryMinus: return 3
-    case "^": return 4
-    default: return 0
-    }
-  }
-
-  private static func isRightAssociative(_ op: Character) -> Bool {
-    op == "^" || op == unaryMinus
-  }
-
-  static func shuntingYard(_ tokens: [Token]) -> [Token]? {
-    var output: [Token] = []
-    var stack: [Token] = []
-    for token in tokens where !applyToken(token, output: &output, stack: &stack) {
-      return nil
-    }
-    while let top = stack.popLast() {
-      if case .lparen = top { return nil }
-      output.append(top)
-    }
-    return output
-  }
-
-  private static func applyToken(_ token: Token, output: inout [Token], stack: inout [Token]) -> Bool {
-    switch token {
-    case .number:
-      output.append(token)
-    case .op(let op):
-      // Prefix operators have no left operand, so nothing on the stack
-      // can be reduced before them.
-      if op != unaryMinus {
-        drainOperators(higherThan: op, output: &output, stack: &stack)
-      }
-      stack.append(token)
-    case .lparen:
-      stack.append(token)
-    case .rparen:
-      return drainToLParen(output: &output, stack: &stack)
-    }
-    return true
-  }
-
-  private static func drainOperators(
-    higherThan op: Character,
-    output: inout [Token],
-    stack: inout [Token]
-  ) {
-    while let top = stack.last, case .op(let topOp) = top {
-      let topPrec = precedence(topOp)
-      let curPrec = precedence(op)
-      guard topPrec > curPrec || (topPrec == curPrec && !isRightAssociative(op)) else { return }
-      output.append(stack.removeLast())
-    }
-  }
-
-  private static func drainToLParen(output: inout [Token], stack: inout [Token]) -> Bool {
-    while let top = stack.last {
-      if case .lparen = top {
-        stack.removeLast()
-        return true
-      }
-      output.append(stack.removeLast())
-    }
-    return false
-  }
-
-  // MARK: RPN evaluation
-
-  private static func evaluateRPN(_ rpn: [Token]) -> Double? {
-    var stack: [Double] = []
-    for token in rpn {
-      switch token {
-      case .number(let value):
-        stack.append(value)
-      case .op(let op) where op == unaryMinus:
-        guard let operand = stack.popLast() else { return nil }
-        stack.append(-operand)
-      case .op(let op):
-        guard let rhs = stack.popLast(), let lhs = stack.popLast() else { return nil }
-        guard let value = applyBinary(op, lhs, rhs) else { return nil }
-        stack.append(value)
-      default:
-        return nil
-      }
-    }
-    return stack.count == 1 ? stack[0] : nil
-  }
-
-  private static func applyBinary(_ op: Character, _ lhs: Double, _ rhs: Double) -> Double? {
-    switch op {
-    case "+": return lhs + rhs
-    case "-": return lhs - rhs
-    case "*": return lhs * rhs
-    case "/":
-      guard rhs != 0 else { return nil }
-      return lhs / rhs
-    case "%":
-      guard rhs != 0 else { return nil }
-      return lhs.truncatingRemainder(dividingBy: rhs)
-    case "^": return pow(lhs, rhs)
-    default: return nil
-    }
   }
 }
