@@ -357,7 +357,12 @@ struct MultilineEditor: NSViewRepresentable {
     textView.defaultParagraphStyle = fixedParagraphStyle
     textView.typingAttributes = textAttributes
     textView.editorTextAttributes = textAttributes
-    textView.checkboxCheckedColor = .systemGreen.withAlphaComponent(0.95)
+    // systemGreen is ~2:1 on light backgrounds; a deeper green keeps the
+    // checked box at >= 3:1 (WCAG non-text contrast) on every light theme.
+    textView.checkboxCheckedColor =
+      theme.mode == .dark
+      ? .systemGreen.withAlphaComponent(0.95)
+      : NSColor(srgbRed: 0.10, green: 0.50, blue: 0.22, alpha: 1)
     // Derive the unchecked border from the text colour rather than the placeholder.
     // Dark themes (e.g. Obsidian): text is near-white → 0.50 opacity = visible light border.
     // Light themes: text is near-black → 0.65 opacity = a dark, legible stroke.
