@@ -33,8 +33,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundleName</key>                    <string>SpotNote</string>
   <key>CFBundleDisplayName</key>             <string>SpotNote</string>
   <key>CFBundlePackageType</key>             <string>APPL</string>
-  <key>CFBundleShortVersionString</key>      <string>0.6.0</string>
-  <key>CFBundleVersion</key>                 <string>23</string>
+  <key>CFBundleShortVersionString</key>      <string>0.7.0</string>
+  <key>CFBundleVersion</key>                 <string>24</string>
   <key>LSMinimumSystemVersion</key>          <string>14.0</string>
   <key>LSUIElement</key>                     <true/>
   <key>CFBundleIconFile</key>                <string>AppIcon</string>

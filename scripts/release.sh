@@ -256,14 +256,13 @@ cat > "$RELEASE_NOTES_PATH" <<HTML
   <p>Published $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
   <h2>What’s new</h2>
   <ul>
-    <li>New: nested checklists. Return continues a list, Tab / Shift-Tab indent, Backspace removes an empty box, and parents check themselves when all their sub-items are done.</li>
-    <li>New: Settings &gt; Editor has a panel width slider and a “Wrap long lines” toggle (turn it off to scroll long lines horizontally).</li>
-    <li>New: Vim <code>ciw</code> / <code>diw</code> / <code>yiw</code> (and <code>aw</code>), <code>yy</code>, <code>p</code> / <code>P</code>; <code>cw</code> now enters insert mode.</li>
-    <li>Fixed: Return in ⌘P search now opens the result you moved to with ⌃N / ⌃P.</li>
-    <li>Fixed: text no longer flickers between two rows near the end of a line with an external display or mouse attached.</li>
-    <li>Fixed: copying and pasting checklists keeps every level rendered, and selected checkboxes no longer show a second square.</li>
-    <li>Fixed: the last edits before quitting are always saved, and the append-to-note shortcut opens the most recently edited note.</li>
-    <li>Fixed: shortcuts recorded with ⇧ and punctuation (e.g. ⌘⇧.) work again, and several smaller math, search and import issues.</li>
+    <li>New: links, emails, file paths and dates are detected. ⌘-click to open them.</li>
+    <li>New: <code>#tags</code>. Hover a tag to give it a colour, and type <code>#tag</code> in ⌘P search to filter notes.</li>
+    <li>New: optional Markdown preview (Settings &gt; Editor). Headings, bold, italic, strikethrough and links render in place; the line you are on shows the raw text.</li>
+    <li>New: keep your notes as a folder of Markdown files (Settings &gt; Storage), e.g. in iCloud Drive or an Obsidian vault. Your existing notes are copied, never moved. You can also import notes from any folder.</li>
+    <li>New: smarter math. <code>100k/2k</code>, variables (<code>rate = 42</code>, then <code>rate * 8</code>), percentages (<code>20% of 150</code>, <code>150 + 10%</code>) and unit conversions (<code>5 km in mi</code>, <code>3h 20m in min</code>, <code>100 F in C</code>).</li>
+    <li>New: version history for every note (⌘Y). Browse earlier versions and restore any of them. History is stored compactly.</li>
+  </ul>
   </ul>
 </body>
 </html>
