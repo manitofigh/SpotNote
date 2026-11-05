@@ -19,6 +19,9 @@ public actor ChatStore {
   /// Set when a Markdown-folder write failed and the note was saved to the
   /// built-in directory instead (see `persistNow`).
   private var hasFallbackWrites = false
+  /// Notes whose latest text only reached the built-in fallback; written
+  /// to the folder again by `copyBuiltInNotesIntoFolder`.
+  private var pendingFolderWrites: Set<UUID> = []
 
   /// - Parameter now: clock for `createdAt` / `updatedAt` and conflict
   ///   names; injectable for tests.
@@ -179,10 +182,12 @@ public actor ChatStore {
       if let displaced = try backend.write(chat, conflictStamp: nil), displaced.text != chat.text {
         try saveConflictCopy(of: displaced)
       }
+      pendingFolderWrites.remove(chat.id)
     } catch  where configuration.markdownFolder != nil {
       StorageLog.logger.error("folder write failed, saving to built-in storage: \(error, privacy: .public)")
       _ = try JSONChatDirectory(directory: configuration.builtInDirectory).write(chat, conflictStamp: nil)
       hasFallbackWrites = true
+      pendingFolderWrites.insert(chat.id)
     }
   }
 
@@ -214,11 +219,17 @@ extension ChatStore {
 
   /// Makes `folder` the primary storage. The notes currently in the
   /// library are COPIED into it (see `PortSummary`); the built-in JSON
-  /// directory is never modified, so it remains a backup. Re-enabling the
-  /// same folder is idempotent: notes already there (by id) are skipped.
+  /// directory is never modified, so it remains a backup.
+  ///
+  /// Coming from built-in storage, a folder used before only receives
+  /// built-in notes edited since this library last synced with it (see
+  /// `FolderPortLedger`), so notes deleted from the folder stay deleted.
+  /// A folder chosen for the first time gets a full copy. Coming from
+  /// another folder, all current notes are copied (idempotent by id).
   public func useMarkdownFolder(_ folder: URL) async throws -> PortSummary {
     await flush()
     let source = Array(chats.values)
+    let since = isUsingMarkdownFolder ? nil : ledger.lastSync(with: folder)
     var markdown = try MarkdownChatFolder(folder: folder)
     let folderChats = try markdown.loadAll()
     let previous = (backend, chats, configuration)
@@ -226,7 +237,9 @@ extension ChatStore {
     chats = folderChats
     configuration.markdownFolder = folder
     do {
-      return try port(source)
+      let summary = try port(source, editedAfter: since)
+      ledger.recordSync(with: folder, at: now())
+      return summary
     } catch {
       (backend, chats, configuration) = previous
       throw error
@@ -241,7 +254,7 @@ extension ChatStore {
   @discardableResult
   public func useBuiltInStorage(copyingFolderNotes: Bool) async throws -> Int {
     await flush()
-    guard isUsingMarkdownFolder else { return 0 }
+    guard let folder = configuration.markdownFolder else { return 0 }
     let json = try JSONChatDirectory(directory: configuration.builtInDirectory)
     var builtIn = json.loadAll()
     var copied = 0
@@ -258,17 +271,27 @@ extension ChatStore {
     backend = json
     chats = builtIn
     configuration.markdownFolder = nil
+    // Built-in notes untouched from here on are either copies of folder
+    // notes or the stale pre-folder backup; neither may flow back into the
+    // folder on a later re-enable (that would resurrect deleted notes).
+    ledger.recordSync(with: folder, at: now())
     return copied
   }
 
   /// Re-runs the port from the built-in directory into the active folder.
   /// Used after a session that had to fall back to built-in storage, so
   /// edits made meanwhile reach the folder (as conflict copies when the
-  /// folder's version also changed).
+  /// folder's version also changed). Only notes edited since the last
+  /// sync with this folder are considered.
   public func copyBuiltInNotesIntoFolder() throws -> PortSummary {
-    guard isUsingMarkdownFolder else { return PortSummary() }
+    guard let folder = configuration.markdownFolder else { return PortSummary() }
+    for id in pendingFolderWrites {
+      if let chat = chats[id] { try persistNow(chat) } else { pendingFolderWrites.remove(id) }
+    }
     let source = try JSONChatDirectory(directory: configuration.builtInDirectory).loadAll()
-    return try port(Array(source.values))
+    let summary = try port(Array(source.values), editedAfter: ledger.lastSync(with: folder))
+    ledger.recordSync(with: folder, at: now())
+    return summary
   }
 
   /// True once (then reset) if any write had to fall back to the built-in
@@ -330,12 +353,19 @@ extension ChatStore {
     return try JSONChatDirectory(directory: configuration.builtInDirectory)
   }
 
-  /// Copy rule: new id -> copy; same id and same text, or the folder's
-  /// version is at least as new -> skip; otherwise -> conflict copy.
-  /// Never overwrites a file in the folder.
-  private func port(_ source: [Chat]) throws -> PortSummary {
+  private var ledger: FolderPortLedger { FolderPortLedger(builtInDirectory: configuration.builtInDirectory) }
+
+  /// Copy rule: edited at or before `cutoff` -> skip (already synced, or
+  /// deliberately removed from the folder since); new id -> copy; same id
+  /// and same text, or the folder's version is at least as new -> skip;
+  /// otherwise -> conflict copy. Never overwrites a file in the folder.
+  private func port(_ source: [Chat], editedAfter cutoff: Date?) throws -> PortSummary {
     var summary = PortSummary()
     for chat in source.sorted(by: { $0.createdAt < $1.createdAt }) {
+      if let cutoff, chat.updatedAt <= cutoff {
+        summary.skipped += 1
+        continue
+      }
       guard let existing = chats[chat.id] else {
         _ = try backend.write(chat, conflictStamp: nil)
         chats[chat.id] = chat

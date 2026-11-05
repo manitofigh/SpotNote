@@ -224,9 +224,11 @@ struct MarkdownFolderStorageTests {
   func snapshot(of directory: URL) throws -> [String: Data] {
     var result: [String: Data] = [:]
     let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil)
+    // The folder-sync ledger is bookkeeping next to the notes, not a note.
     while let url = enumerator?.nextObject() as? URL {
       var isDirectory: ObjCBool = false
-      guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue
+      guard url.lastPathComponent != "folder-ports.plist",
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue
       else { continue }
       let modified = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
       result[url.path + "@\(modified?.timeIntervalSince1970 ?? 0)"] = try Data(contentsOf: url)

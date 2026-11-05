@@ -168,8 +168,10 @@ public final class StorageLocationController: ObservableObject {
     let alert = NSAlert()
     alert.messageText = "Switch back to built-in storage?"
     alert.informativeText =
-      "Your folder and its files stay untouched. You can also copy notes that are new or newer in the folder "
-      + "into built-in storage."
+      "Built-in storage still holds your notes as they were when you started using the folder, including "
+      + "notes you have since deleted there. “Copy Notes & Switch” also brings over notes created or edited "
+      + "in the folder since then. “Switch Only” shows just the old built-in notes; recent folder edits and "
+      + "new notes won't appear. Either way the folder and its files stay untouched."
     alert.addButton(withTitle: "Copy Notes & Switch")
     alert.addButton(withTitle: "Switch Only")
     alert.addButton(withTitle: "Cancel")
